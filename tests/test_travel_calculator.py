@@ -17,6 +17,7 @@ from services.travel_calculator import (
     round_to_ten,
     settle_lodging,
     truncate_to_ten,
+    truncate_to_won,
     usd_to_krw_truncated,
     validate_travel_input,
 )
@@ -54,6 +55,12 @@ def test_round_to_ten_half_up():
     assert round_to_ten(Decimal("163809.36")) == 163810
 
 
+def test_truncate_to_won_drops_fraction():
+    assert truncate_to_won(Decimal("510205.9")) == 510_205
+    assert truncate_to_won(510_205) == 510_205
+    assert truncate_to_won(Decimal("163809.36")) == 163_809
+
+
 def test_truncate_to_ten_drops_ones():
     assert truncate_to_ten(163809) == 163800
     assert truncate_to_ten(163804) == 163800
@@ -62,13 +69,20 @@ def test_truncate_to_ten_drops_ones():
     assert truncate_to_ten(163800) == 163800
 
 
-def test_allowance_krw_uses_won_unit_truncation():
-    assert usd_to_krw_truncated(104, 1575.09) == 163800
+def test_allowance_krw_keeps_won_units():
+    assert usd_to_krw_truncated(104, 1575.09) == 163_809
     result = calculate_travel(_sample(exchange_rate=1575.09, lodging_nights=3))
     assert result.daily.amount_usd == 130
-    assert result.daily.amount_krw == truncate_to_ten(130 * 1575.09)
-    assert result.meal.amount_krw == truncate_to_ten(335 * 1575.09)
-    assert result.lodging.ceiling_krw == truncate_to_ten(155 * 3 * 1575.09)
+    assert result.daily.amount_krw == truncate_to_won(130 * 1575.09)
+    assert result.meal.amount_krw == truncate_to_won(335 * 1575.09)
+    assert result.lodging.ceiling_krw == truncate_to_won(155 * 3 * 1575.09)
+
+
+def test_fx_1523_keeps_ones_place():
+    result = calculate_travel(_sample(exchange_rate=1523))
+    assert result.daily.amount_krw == 197_990
+    assert result.meal.amount_krw == 510_205
+    assert result.lodging.ceiling_krw == 944_260
 
 
 def test_spec_example_under_ceiling():

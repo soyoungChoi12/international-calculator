@@ -105,8 +105,8 @@ def _slice_line(slices, unit: str) -> str:
 
     if len(slices) == 1 and not slices[0].label:
         item = slices[0]
-        return f"{item.rate_usd} USD × {item.quantity}{unit} = {item.amount_usd} USD, 원단위 절사"
-    return " + ".join(_part(item) for item in slices) + ", 원단위 절사"
+        return f"{item.rate_usd} USD × {item.quantity}{unit} = {item.amount_usd} USD, 원 미만 절사"
+    return " + ".join(_part(item) for item in slices) + ", 원 미만 절사"
 
 
 def _render_stay(

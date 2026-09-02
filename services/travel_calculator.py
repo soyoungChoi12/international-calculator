@@ -33,8 +33,14 @@ def round_to_ten(amount: float | int | Decimal) -> int:
     return int(value.quantize(Decimal("1E1"), rounding=ROUND_HALF_UP))
 
 
+def truncate_to_won(amount: float | int | Decimal) -> int:
+    """원 미만 절사. (1원 아래 소수만 버림)"""
+    value = Decimal(str(amount))
+    return int(value.to_integral_value(rounding=ROUND_DOWN))
+
+
 def truncate_to_ten(amount: float | int | Decimal) -> int:
-    """원단위 절사. 일비·식비 원화에 사용한다. (1원 자리를 버림)"""
+    """십원 단위 절사. (1원 자리를 버림, 할인정액 등 별도 규정용)"""
     value = Decimal(str(amount))
     return int(value.quantize(Decimal("1E1"), rounding=ROUND_DOWN))
 
@@ -50,8 +56,8 @@ def usd_to_krw(usd_amount: float | int | Decimal, exchange_rate: float) -> int:
 
 
 def usd_to_krw_truncated(usd_amount: float | int | Decimal, exchange_rate: float) -> int:
-    """일비·식비·숙박비 상한: USD × 환율 후 원단위 절사."""
-    return truncate_to_ten(Decimal(str(usd_amount)) * Decimal(str(exchange_rate)))
+    """일비·식비·숙박비 상한: USD × 환율 후 원 미만 절사."""
+    return truncate_to_won(Decimal(str(usd_amount)) * Decimal(str(exchange_rate)))
 
 
 @dataclass(frozen=True)
@@ -380,7 +386,7 @@ def _slices_by_grade(
     items: list[tuple],
     exchange_rate: float,
 ) -> tuple[RateSlice, ...]:
-    """(grade, rate_usd, quantity[, label]) → 등급·단가별 합산 후 원단위 절사."""
+    """(grade, rate_usd, quantity[, label]) → 등급·단가별 합산 후 원 미만 절사."""
     grouped: dict[tuple[str, int, str], int] = defaultdict(int)
     for item in items:
         grade, rate_usd, quantity = item[0], item[1], item[2]

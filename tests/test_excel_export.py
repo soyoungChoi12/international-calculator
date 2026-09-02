@@ -62,6 +62,9 @@ def test_example_trip_fills_left_and_grade_a_block():
     assert ws["J9"].value == 5
     assert ws["I9"].value == 67
     assert ws["L9"].value == 469_000
+    assert ws["M7"].value == 182_000
+    assert ws["M9"].value == 469_000
+    assert ws["I13"].value is None
     assert ws["H26"].value == 868_000
     assert ws["I26"].value == 750_000
     assert ws["K26"].value == "미초과"
@@ -102,6 +105,7 @@ def test_multi_city_fills_grade_a_and_b_day_cells():
     assert ws["J11"].value == 3
     assert ws["J12"].value == 2
     assert ws["J13"].value == 3
+    assert ws["I13"].value == 49
     assert ws["C7"].value == 145_600
     wb.close()
 
@@ -166,4 +170,20 @@ def test_multi_city_lodging_actual_goes_to_grade_check():
     assert ws["I27"].value == 200_000
     assert ws["L26"].value == 300_000
     assert ws["L27"].value == 200_000
+    wb.close()
+
+
+def test_fx_1523_writes_won_units_to_excel():
+    result = calculate_travel(_sample(exchange_rate=1523))
+    wb, _ = _workbook(result)
+    ws = wb[OUTPUT_SHEET_NAME]
+    assert ws["C7"].value == 197_990
+    assert ws["C8"].value == 510_205
+    assert ws["L7"].value == 197_990
+    assert ws["L8"].value == 944_260
+    assert ws["L9"].value == 510_205
+    assert ws["M7"].value == 197_990
+    assert ws["M9"].value == 510_200
+    assert ws["H26"].value == 944_260
+    assert ws["C19"].value == 708_195
     wb.close()

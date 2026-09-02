@@ -25,6 +25,8 @@ from config.excel_mapping import (
     FX_GUIDE_TEXT,
     FX_SOURCE_TEXT,
     FX_SOURCE_URL,
+    GRADE_CALC_COLUMNS,
+    GRADE_CALC_ROWS,
     OUTPUT_SHEET_NAME,
     RATE_PLAIN_ROWS,
     TEMPLATE_PATH,
@@ -33,7 +35,7 @@ from config.excel_mapping import (
     grade_calc_cell,
     lodging_check_cell,
 )
-from services.travel_calculator import RateSlice, TravelResult, lodging_actual_by_grade
+from services.travel_calculator import RateSlice, TravelResult, lodging_actual_by_grade, truncate_to_ten
 
 
 def excel_filename(traveler_name: str, when: date) -> str:
@@ -94,6 +96,7 @@ def _fill_workbook(wb, result: TravelResult, approval_date: date) -> None:
         ws[cells["lodging_note"]] = result.lodging.note
 
     _fill_grade_blocks(ws, result)
+    _clear_unused_grade_blocks(ws, result)
     _unstyled_rate_column(ws)
     _fill_lodging_check(ws, result)
 
@@ -133,7 +136,18 @@ def _write_grade_row(ws: Worksheet, grade: str, kind: str, line: dict[str, int] 
     ws[grade_calc_cell(grade, kind, "days")] = line["days"]
     ws[grade_calc_cell(grade, kind, "amount_usd")] = line["amount_usd"]
     ws[grade_calc_cell(grade, kind, "amount_krw")] = line["amount_krw"]
-    ws[grade_calc_cell(grade, kind, "amount_krw_rounded")] = line["amount_krw"]
+    ws[grade_calc_cell(grade, kind, "amount_krw_rounded")] = truncate_to_ten(line["amount_krw"])
+
+
+def _clear_unused_grade_blocks(ws: Worksheet, result: TravelResult) -> None:
+    """출장에 없는 등급 칸의 조회 수식을 지운다. (예: 가급만 쓰면 I13에 식비 단가 49가 남는 것)"""
+    used = set(result.grade_quantities)
+    for grade, rows in GRADE_CALC_ROWS.items():
+        if grade in used:
+            continue
+        for row in rows.values():
+            for column in GRADE_CALC_COLUMNS.values():
+                ws[f"{column}{row}"] = None
 
 
 def _unstyled_rate_column(ws: Worksheet) -> None:
