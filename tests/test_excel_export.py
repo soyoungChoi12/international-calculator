@@ -192,3 +192,18 @@ def test_fx_1523_writes_won_units_to_excel():
     assert ws["C19"].value == 708_190
     assert ws["C20"].value == 2_728_190
     wb.close()
+
+
+def test_zero_airfare_lodging_prep_write_dash_in_d_column():
+    result = calculate_travel(_sample(airfare_krw=0, lodging_actual_krw=0, preparation_krw=0))
+    wb, _ = _workbook(result)
+    ws = wb[OUTPUT_SHEET_NAME]
+    assert ws["C6"].value == 0
+    assert ws["D6"].value == "-"
+    assert ws["D7"].value == PAYMENT_PERSONAL
+    assert ws["D8"].value == PAYMENT_PERSONAL
+    assert ws["C9"].value == 0
+    assert ws["D9"].value == "-"
+    assert ws["C10"].value == 0
+    assert ws["D10"].value == "-"
+    wb.close()

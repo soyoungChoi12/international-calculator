@@ -32,6 +32,7 @@ from config.excel_mapping import (
     RATE_PLAIN_ROWS,
     TEMPLATE_PATH,
     TEMPLATE_SHEET_NAME,
+    UNENTERED_PAYMENT_MARK,
     grade_calc_cell,
     lodging_check_cell,
 )
@@ -47,6 +48,11 @@ from services.travel_calculator import (
 def excel_filename(traveler_name: str, when: date) -> str:
     safe = re.sub(r'[\\/:*?"<>|]', "", traveler_name.strip()) or "미기재"
     return f"국외여비지급내역서_{safe}_{when.strftime('%Y%m%d')}.xlsx"
+
+
+def _payment_or_dash(amount_krw: int, payment_method: str) -> str:
+    """금액이 0이면 지급방식을 비우고 '-'를 적는다."""
+    return UNENTERED_PAYMENT_MARK if amount_krw == 0 else payment_method
 
 
 def build_excel_bytes(result: TravelResult, traveler_name: str, approval_date: date) -> bytes:
@@ -82,15 +88,17 @@ def _fill_workbook(wb, result: TravelResult, approval_date: date) -> None:
     ws[cells["fx_date_label"]] = f"{FX_RATE_KIND}({approval_date.strftime('%y.%m.%d')})"
 
     ws[cells["airfare_amount"]] = execution_krw(result.airfare_krw)
-    ws[cells["airfare_payment_method"]] = result.airfare_payment_method
+    ws[cells["airfare_payment_method"]] = _payment_or_dash(result.airfare_krw, result.airfare_payment_method)
     ws[cells["daily_amount"]] = execution_krw(result.daily.amount_krw)
     ws[cells["daily_payment_method"]] = result.daily.payment_method
     ws[cells["meal_amount"]] = execution_krw(result.meal.amount_krw)
     ws[cells["meal_payment_method"]] = result.meal.payment_method
     ws[cells["lodging_amount"]] = execution_krw(result.lodging.payable_krw)
-    ws[cells["lodging_payment_method"]] = result.lodging.payment_method
+    ws[cells["lodging_payment_method"]] = _payment_or_dash(result.lodging.payable_krw, result.lodging.payment_method)
     ws[cells["preparation_amount"]] = execution_krw(result.preparation_krw)
-    ws[cells["preparation_payment_method"]] = result.preparation_payment_method
+    ws[cells["preparation_payment_method"]] = _payment_or_dash(
+        result.preparation_krw, result.preparation_payment_method
+    )
     ws[cells["total_amount"]] = result.total_krw
     ws[cells["corporate_card_total"]] = result.corporate_card_total
     ws[cells["personal_transfer_total"]] = result.personal_transfer_total
