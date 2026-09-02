@@ -23,6 +23,7 @@ from config.excel_mapping import (
     BLANK_CELLS,
     EXCEL_CELL_MAP,
     FX_GUIDE_TEXT,
+    FX_RATE_KIND,
     FX_SOURCE_TEXT,
     FX_SOURCE_URL,
     GRADE_CALC_COLUMNS,
@@ -72,7 +73,7 @@ def _fill_workbook(wb, result: TravelResult, approval_date: date) -> None:
     ws[cells["fx_source_link"]].hyperlink = FX_SOURCE_URL
     ws[cells["fx_guide"]] = FX_GUIDE_TEXT
     ws[cells["fx_rate"]] = result.exchange_rate
-    ws[cells["fx_date_label"]] = f"매매기준({approval_date.strftime('%y.%m.%d')})"
+    ws[cells["fx_date_label"]] = f"{FX_RATE_KIND}({approval_date.strftime('%y.%m.%d')})"
 
     ws[cells["airfare_amount"]] = result.airfare_krw
     ws[cells["airfare_payment_method"]] = result.airfare_payment_method

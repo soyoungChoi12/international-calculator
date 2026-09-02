@@ -7,6 +7,7 @@ from datetime import date
 
 import streamlit as st
 
+from config.excel_mapping import FX_SOURCE_CAPTION
 from data.travel_rates import GRADES, PAYMENT_CORPORATE, PAYMENT_PERSONAL, PAYMENT_METHODS, ROLES
 from services.destination_grade_service import list_countries, resolve_destination_grade
 from services.excel_export import build_excel_bytes, excel_filename
@@ -352,7 +353,7 @@ def main() -> None:
         st.caption(
             f"출장일수 {trip_days}일 (출국일·귀국일 포함) · 숙박 {total_nights}박 · "
             f"체류 {total_stay_days}일{rental_caption}{lodging_caption}{extra} · "
-            f"환율 기준일 {approval.isoformat()} · 출처: 서울외국환중개소"
+            f"환율 기준일 {approval.isoformat()} · 출처: {FX_SOURCE_CAPTION}"
         )
         if len(stay_ids) > 1:
             st.caption(
@@ -377,7 +378,7 @@ def main() -> None:
                 value=None,
                 placeholder="0.00",
                 key="exchange_rate",
-                help="서울외국환중개소 환율. 자동조회는 다음 단계에서 연결합니다.",
+                help="하나은행 환율정보 · 미국달러 현찰 살 때. 자동조회는 다음 단계에서 연결합니다.",
             )
 
             air_c, air_p = st.columns([2, 2])
@@ -486,7 +487,7 @@ def main() -> None:
         st.markdown(
             f"- 기준일: {packed['approval']}\n"
             f"- USD/KRW: **{result.exchange_rate:,.2f}원**\n"
-            f"- 출처: 서울외국환중개소"
+            f"- 출처: {FX_SOURCE_CAPTION}"
         )
 
         daily_detail = _slice_line(result.daily.slices, "일")

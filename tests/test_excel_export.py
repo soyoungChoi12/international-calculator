@@ -50,8 +50,10 @@ def test_example_trip_fills_left_and_grade_a_block():
     assert ws["C19"].value == 651_000
     assert ws["C20"].value == 2_671_000
     assert ws["L4"].value == 1400
-    assert ws["M4"].value == "매매기준(26.08.31)"
-    assert ws["K3"].value == "서울외국환중개소"
+    assert ws["M4"].value == "현찰 살 때(26.08.31)"
+    assert ws["K3"].value == "하나은행 환율정보"
+    assert ws["K3"].hyperlink.target == "https://www.kebhana.com/cont/mall/mall15/mall1501/index.jsp"
+    assert "미국달러 현찰 살 때" in str(ws["M3"].value)
     assert ws["J7"].value == 5
     assert ws["I7"].value == 26
     assert ws["K7"].value == 130
