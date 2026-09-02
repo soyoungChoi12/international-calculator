@@ -180,12 +180,15 @@ def test_fx_1523_writes_won_units_to_excel():
     wb, _ = _workbook(result)
     ws = wb[OUTPUT_SHEET_NAME]
     assert ws["C7"].value == 197_990
-    assert ws["C8"].value == 510_205
+    assert ws["C8"].value == 510_200
+    assert ws["C11"].value == 2_728_190
     assert ws["L7"].value == 197_990
     assert ws["L8"].value == 944_260
     assert ws["L9"].value == 510_205
     assert ws["M7"].value == 197_990
     assert ws["M9"].value == 510_200
     assert ws["H26"].value == 944_260
-    assert ws["C19"].value == 708_195
+    assert ws["C18"].value == 2_020_000
+    assert ws["C19"].value == 708_190
+    assert ws["C20"].value == 2_728_190
     wb.close()

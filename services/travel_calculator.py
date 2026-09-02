@@ -40,9 +40,14 @@ def truncate_to_won(amount: float | int | Decimal) -> int:
 
 
 def truncate_to_ten(amount: float | int | Decimal) -> int:
-    """십원 단위 절사. (1원 자리를 버림, 할인정액 등 별도 규정용)"""
+    """십원 단위 절사. (1원 자리를 버림)"""
     value = Decimal(str(amount))
     return int(value.quantize(Decimal("1E1"), rounding=ROUND_DOWN))
+
+
+def execution_krw(amount: float | int | Decimal) -> int:
+    """집행 금액: 원화 1원 단위 계산 후 원단위(1원 자리) 절사."""
+    return truncate_to_ten(amount)
 
 
 def calculate_trip_days(departure: date, return_on: date) -> int:
@@ -562,11 +567,11 @@ def calculate_travel(inp: TravelInput) -> TravelResult:
     lodging = replace(lodging, slices=lodging_slices)
 
     payment_items = [
-        (inp.airfare_krw, inp.airfare_payment_method),
-        (daily.amount_krw, daily.payment_method),
-        (meal.amount_krw, meal.payment_method),
-        (lodging.payable_krw, lodging.payment_method),
-        (inp.preparation_krw, inp.preparation_payment_method),
+        (execution_krw(inp.airfare_krw), inp.airfare_payment_method),
+        (execution_krw(daily.amount_krw), daily.payment_method),
+        (execution_krw(meal.amount_krw), meal.payment_method),
+        (execution_krw(lodging.payable_krw), lodging.payment_method),
+        (execution_krw(inp.preparation_krw), inp.preparation_payment_method),
     ]
     total_krw = sum(amount for amount, _ in payment_items)
     warnings = list(validation.warnings)

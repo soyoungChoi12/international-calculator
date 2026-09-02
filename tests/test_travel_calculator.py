@@ -16,6 +16,7 @@ from services.travel_calculator import (
     lodging_actual_by_grade,
     round_to_ten,
     settle_lodging,
+    execution_krw,
     truncate_to_ten,
     truncate_to_won,
     usd_to_krw_truncated,
@@ -83,6 +84,10 @@ def test_fx_1523_keeps_ones_place():
     assert result.daily.amount_krw == 197_990
     assert result.meal.amount_krw == 510_205
     assert result.lodging.ceiling_krw == 944_260
+    assert execution_krw(result.meal.amount_krw) == 510_200
+    assert result.personal_transfer_total == 708_190
+    assert result.corporate_card_total == 2_020_000
+    assert result.total_krw == 2_728_190
 
 
 def test_spec_example_under_ceiling():

@@ -508,7 +508,7 @@ def main() -> None:
             f"- 숙박비 실비(C9): {_amount(result.lodging.payable_krw)} ({result.lodging.payment_method})"
             + lodging_note
             + f"\n- 준비금: {_amount(result.preparation_krw)} ({result.preparation_payment_method})\n"
-            f"- 엑셀: L열 원화금액은 1원 단위, M열은 원단위 절사"
+            f"- 엑셀: L열 원화금액은 1원 단위, C열 집행금액·합계와 M열은 원단위 절사"
         )
 
         m1, m2, m3 = st.columns(3)

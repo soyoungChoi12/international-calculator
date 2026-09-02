@@ -35,7 +35,13 @@ from config.excel_mapping import (
     grade_calc_cell,
     lodging_check_cell,
 )
-from services.travel_calculator import RateSlice, TravelResult, lodging_actual_by_grade, truncate_to_ten
+from services.travel_calculator import (
+    RateSlice,
+    TravelResult,
+    execution_krw,
+    lodging_actual_by_grade,
+    truncate_to_ten,
+)
 
 
 def excel_filename(traveler_name: str, when: date) -> str:
@@ -75,15 +81,15 @@ def _fill_workbook(wb, result: TravelResult, approval_date: date) -> None:
     ws[cells["fx_rate"]] = result.exchange_rate
     ws[cells["fx_date_label"]] = f"{FX_RATE_KIND}({approval_date.strftime('%y.%m.%d')})"
 
-    ws[cells["airfare_amount"]] = result.airfare_krw
+    ws[cells["airfare_amount"]] = execution_krw(result.airfare_krw)
     ws[cells["airfare_payment_method"]] = result.airfare_payment_method
-    ws[cells["daily_amount"]] = result.daily.amount_krw
+    ws[cells["daily_amount"]] = execution_krw(result.daily.amount_krw)
     ws[cells["daily_payment_method"]] = result.daily.payment_method
-    ws[cells["meal_amount"]] = result.meal.amount_krw
+    ws[cells["meal_amount"]] = execution_krw(result.meal.amount_krw)
     ws[cells["meal_payment_method"]] = result.meal.payment_method
-    ws[cells["lodging_amount"]] = result.lodging.payable_krw
+    ws[cells["lodging_amount"]] = execution_krw(result.lodging.payable_krw)
     ws[cells["lodging_payment_method"]] = result.lodging.payment_method
-    ws[cells["preparation_amount"]] = result.preparation_krw
+    ws[cells["preparation_amount"]] = execution_krw(result.preparation_krw)
     ws[cells["preparation_payment_method"]] = result.preparation_payment_method
     ws[cells["total_amount"]] = result.total_krw
     ws[cells["corporate_card_total"]] = result.corporate_card_total
