@@ -31,7 +31,6 @@ from config.excel_mapping import (
     RATE_PLAIN_ROWS,
     TEMPLATE_PATH,
     TEMPLATE_SHEET_NAME,
-    TOTAL_FORMULA,
     grade_calc_cell,
     lodging_check_cell,
 )
@@ -85,10 +84,22 @@ def _fill_workbook(wb, result: TravelResult, approval_date: date) -> None:
     ws[cells["lodging_payment_method"]] = result.lodging.payment_method
     ws[cells["preparation_amount"]] = result.preparation_krw
     ws[cells["preparation_payment_method"]] = result.preparation_payment_method
-    ws[cells["total_amount"]] = f"={TOTAL_FORMULA}"
+    ws[cells["total_amount"]] = result.total_krw
     ws[cells["corporate_card_total"]] = result.corporate_card_total
     ws[cells["personal_transfer_total"]] = result.personal_transfer_total
     ws[cells["payee_grand_total"]] = result.corporate_card_total + result.personal_transfer_total
+    for address in (
+        cells["airfare_amount"],
+        cells["daily_amount"],
+        cells["meal_amount"],
+        cells["lodging_amount"],
+        cells["preparation_amount"],
+        cells["total_amount"],
+        cells["corporate_card_total"],
+        cells["personal_transfer_total"],
+        cells["payee_grand_total"],
+    ):
+        ws[address].number_format = "#,##0"
 
     if result.rental_days:
         ws[cells["daily_note"]] = f"차량임차 {result.rental_days}일 일비 1/2 적용"
@@ -137,6 +148,8 @@ def _write_grade_row(ws: Worksheet, grade: str, kind: str, line: dict[str, int] 
     ws[grade_calc_cell(grade, kind, "amount_usd")] = line["amount_usd"]
     ws[grade_calc_cell(grade, kind, "amount_krw")] = line["amount_krw"]
     ws[grade_calc_cell(grade, kind, "amount_krw_rounded")] = truncate_to_ten(line["amount_krw"])
+    ws[grade_calc_cell(grade, kind, "amount_krw")].number_format = "#,##0"
+    ws[grade_calc_cell(grade, kind, "amount_krw_rounded")].number_format = "#,##0"
 
 
 def _clear_unused_grade_blocks(ws: Worksheet, result: TravelResult) -> None:
@@ -187,3 +200,5 @@ def _fill_lodging_check(ws: Worksheet, result: TravelResult) -> None:
         ws[lodging_check_cell(grade, "difference")] = ceiling - actual
         ws[lodging_check_cell(grade, "over_flag")] = "초과" if actual > ceiling else "미초과"
         ws[lodging_check_cell(grade, "final_krw")] = actual
+        for key in ("ceiling_krw", "actual_krw", "difference", "final_krw"):
+            ws[lodging_check_cell(grade, key)].number_format = "#,##0"

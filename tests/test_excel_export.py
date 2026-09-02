@@ -45,7 +45,7 @@ def test_example_trip_fills_left_and_grade_a_block():
     assert ws["C8"].value == 469_000
     assert ws["C9"].value == 750_000
     assert ws["C10"].value == 70_000
-    assert ws["C11"].value == "=SUM(C6:C10)"
+    assert ws["C11"].value == 2_671_000
     assert ws["C18"].value == 2_020_000
     assert ws["C19"].value == 651_000
     assert ws["C20"].value == 2_671_000
