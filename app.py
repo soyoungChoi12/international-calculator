@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 
 import streamlit as st
 
@@ -54,20 +54,34 @@ def _payment_index(method: str) -> int:
     return list(PAYMENT_METHODS).index(method)
 
 
-def _reload_fx_for_approval() -> None:
-    """결재일이 바뀌면 그 날짜의 하나은행 미국달러 현찰 살 때를 적용환율에 넣는다."""
-    approval = st.session_state.approval_date
-    quote = hana_fx.fetch_usd_cash_buy(approval)
-    st.session_state.fx_loaded_for = approval.isoformat()
-    st.session_state.fx_quote = quote
-    st.session_state.exchange_rate = quote.rate if quote else None
+def _as_date(value) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    return value
 
 
-def _apply_hana_fx(approval: date) -> None:
-    """첫 화면 진입 시 결재일 환율을 채운다. 날짜 변경은 on_change에서 처리한다."""
-    if st.session_state.get("fx_loaded_for") == approval.isoformat():
+def _fx_input_key() -> str:
+    return f"exchange_rate_{st.session_state.get('fx_widget_id', 0)}"
+
+
+def _sync_fx_for_approval(approval: date) -> None:
+    """결재일에 맞는 하나은행 현찰 살 때를 적용환율 칸에 넣는다.
+
+    환율 number_input은 한 번 만들어진 뒤에는 값을 덮어쓸 수 없어서,
+    날짜가 바뀔 때마다 위젯 키를 바꿔 새로 만든다.
+    """
+    approval = _as_date(approval)
+    loaded = st.session_state.get("fx_loaded_for")
+    if loaded == approval.isoformat() and st.session_state.get("fx_quote") is not None:
         return
-    _reload_fx_for_approval()
+    quote = hana_fx.fetch_usd_cash_buy(approval)
+    st.session_state.fx_quote = quote
+    if quote is None:
+        return
+    st.session_state.fx_loaded_for = approval.isoformat()
+    next_id = int(st.session_state.get("fx_widget_id", 0)) + 1
+    st.session_state.fx_widget_id = next_id
+    st.session_state[f"exchange_rate_{next_id}"] = float(quote.rate)
 
 
 def _init_stay_ids() -> None:
@@ -311,14 +325,15 @@ def main() -> None:
         with date_col2:
             return_on = st.date_input("귀국일", value=today, key="return_date")
         with date_col3:
-            approval = st.date_input(
-                "출장신청서 결재일",
-                value=today,
-                key="approval_date",
-                help="환율 조회 기준일. 날짜를 바꾸면 해당일 하나은행 미국달러 현찰 살 때를 다시 조회합니다.",
-                on_change=_reload_fx_for_approval,
+            approval = _as_date(
+                st.date_input(
+                    "출장신청서 결재일",
+                    value=today,
+                    key="approval_date",
+                    help="환율 조회 기준일. 날짜를 바꾸면 해당일 하나은행 미국달러 현찰 살 때를 다시 조회합니다.",
+                )
             )
-        _apply_hana_fx(approval)
+        _sync_fx_for_approval(approval)
 
         trip_days = calculate_trip_days(departure, return_on) if return_on >= departure else 0
         suggested_nights = max(trip_days - 1, 0)
@@ -400,14 +415,14 @@ def main() -> None:
             format="%.2f",
             value=None,
             placeholder="0.00",
-            key="exchange_rate",
+            key=_fx_input_key(),
             help="하나은행 환율정보 · 미국달러 현찰 살 때. 결재일을 바꾸면 해당 날짜 고시가 자동으로 들어옵니다.",
         )
         fx_quote = st.session_state.get("fx_quote")
         if fx_quote:
             st.caption(quote_caption(fx_quote, approval))
-        elif st.session_state.get("fx_loaded_for") == approval.isoformat():
-            st.caption("하나은행 환율을 가져오지 못했습니다. 미국달러 현찰 살 때를 직접 입력해 주세요.")
+        elif st.session_state.get("fx_loaded_for") != approval.isoformat():
+            st.caption("하나은행 환율을 가져오지 못했습니다. 미국달러 현찰 살 때를 직접 입력하거나, 결재일을 다시 선택해 주세요.")
 
         with st.form("travel_calc"):
             air_c, air_p = st.columns([2, 2])

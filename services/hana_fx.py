@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import http.cookiejar
 import os
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from html.parser import HTMLParser
 
 HANA_FX_PAGE_URL = (
@@ -17,6 +18,7 @@ HANA_FX_PAGE_URL = (
 HANA_FX_LOOKUP_URL = "https://www.kebhana.com/cms/rate/wpfxd651_01i_01.do"
 HANA_FX_REFERER = "https://www.kebhana.com/cms/rate/index.do?contentUrl=/cms/rate/wpfxd651_01i.do"
 _TIMEOUT_SEC = 8
+_MAX_TRIES = 3
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,9 @@ class HanaFxQuote:
     posted_on: date
     round_no: int | None = None
     posted_at: str | None = None
+
+
+_QUOTE_CACHE: dict[str, HanaFxQuote] = {}
 
 
 class _RateTableParser(HTMLParser):
@@ -100,10 +105,13 @@ def _should_skip_network() -> bool:
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) and not os.environ.get("HANA_FX_LIVE")
 
 
-def fetch_usd_cash_buy(when: date) -> HanaFxQuote | None:
-    """결재일 기준 하나은행 미국달러 현찰 살 때. 휴일이면 직전 영업일 고시."""
-    if _should_skip_network():
-        return None
+def _as_date(when: date | datetime) -> date:
+    if isinstance(when, datetime):
+        return when.date()
+    return when
+
+
+def _post_rate_html(when: date) -> str:
     payload = urllib.parse.urlencode(
         {
             "ajax": "true",
@@ -118,22 +126,44 @@ def fetch_usd_cash_buy(when: date) -> HanaFxQuote | None:
             "requestTarget": "searchContentDiv",
         }
     ).encode()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     request = urllib.request.Request(
         HANA_FX_LOOKUP_URL,
         data=payload,
         method="POST",
         headers={
             "User-Agent": "Mozilla/5.0",
+            "Accept": "text/html, */*;q=0.8",
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "Referer": HANA_FX_REFERER,
+            "Connection": "close",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_SEC) as response:
-            html = response.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, TimeoutError, OSError):
+    with opener.open(request, timeout=_TIMEOUT_SEC) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def fetch_usd_cash_buy(when: date) -> HanaFxQuote | None:
+    """결재일 기준 하나은행 미국달러 현찰 살 때. 휴일이면 직전 영업일 고시."""
+    when = _as_date(when)
+    cached = _QUOTE_CACHE.get(when.isoformat())
+    if cached:
+        return cached
+    if _should_skip_network():
         return None
-    return parse_usd_cash_buy(html)
+    quote = None
+    for _ in range(_MAX_TRIES):
+        try:
+            html = _post_rate_html(when)
+        except (urllib.error.URLError, TimeoutError, OSError):
+            continue
+        quote = parse_usd_cash_buy(html)
+        if quote:
+            break
+    if quote:
+        _QUOTE_CACHE[when.isoformat()] = quote
+        _QUOTE_CACHE[quote.posted_on.isoformat()] = quote
+    return quote
 
 
 def quote_caption(quote: HanaFxQuote, requested_on: date) -> str:
