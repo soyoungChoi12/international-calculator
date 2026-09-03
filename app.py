@@ -11,7 +11,8 @@ from config.excel_mapping import FX_SOURCE_CAPTION
 from data.travel_rates import GRADES, PAYMENT_CORPORATE, PAYMENT_PERSONAL, PAYMENT_METHODS, ROLES
 from services.destination_grade_service import list_countries, resolve_destination_grade
 from services.excel_export import build_excel_bytes, excel_filename
-from services.hana_fx import fetch_usd_cash_buy, quote_caption
+from services.hana_fx import quote_caption
+from services import hana_fx
 from services.travel_calculator import (
     StayInput,
     TravelInput,
@@ -53,14 +54,20 @@ def _payment_index(method: str) -> int:
     return list(PAYMENT_METHODS).index(method)
 
 
-def _apply_hana_fx(approval: date) -> None:
-    """결재일이 바뀌면 하나은행 미국달러 현찰 살 때를 적용환율에 넣는다."""
-    if st.session_state.get("fx_loaded_for") == approval.isoformat():
-        return
-    quote = fetch_usd_cash_buy(approval)
+def _reload_fx_for_approval() -> None:
+    """결재일이 바뀌면 그 날짜의 하나은행 미국달러 현찰 살 때를 적용환율에 넣는다."""
+    approval = st.session_state.approval_date
+    quote = hana_fx.fetch_usd_cash_buy(approval)
     st.session_state.fx_loaded_for = approval.isoformat()
     st.session_state.fx_quote = quote
     st.session_state.exchange_rate = quote.rate if quote else None
+
+
+def _apply_hana_fx(approval: date) -> None:
+    """첫 화면 진입 시 결재일 환율을 채운다. 날짜 변경은 on_change에서 처리한다."""
+    if st.session_state.get("fx_loaded_for") == approval.isoformat():
+        return
+    _reload_fx_for_approval()
 
 
 def _init_stay_ids() -> None:
@@ -304,7 +311,13 @@ def main() -> None:
         with date_col2:
             return_on = st.date_input("귀국일", value=today, key="return_date")
         with date_col3:
-            approval = st.date_input("출장신청서 결재일", value=today, key="approval_date", help="환율 조회 기준일")
+            approval = st.date_input(
+                "출장신청서 결재일",
+                value=today,
+                key="approval_date",
+                help="환율 조회 기준일. 날짜를 바꾸면 해당일 하나은행 미국달러 현찰 살 때를 다시 조회합니다.",
+                on_change=_reload_fx_for_approval,
+            )
         _apply_hana_fx(approval)
 
         trip_days = calculate_trip_days(departure, return_on) if return_on >= departure else 0
@@ -374,30 +387,29 @@ def main() -> None:
                 "체류일 합계는 출장일수와 같아야 하며, 엑셀에서는 등급별로 칸이 나뉩니다."
             )
 
-    with st.form("travel_calc"):
-        with st.container(border=True):
-            st.subheader("2. 비용 및 지급정보")
-            st.caption(
-                "일비·식비 금액은 자동 계산합니다. 숙박비 실비는 출장지마다 입력합니다. "
-                "환율과 비용을 입력한 뒤 계산을 누르세요."
-            )
+    with st.container(border=True):
+        st.subheader("2. 비용 및 지급정보")
+        st.caption(
+            "일비·식비 금액은 자동 계산합니다. 숙박비 실비는 출장지마다 입력합니다. "
+            "환율과 비용을 입력한 뒤 계산을 누르세요."
+        )
+        exchange_rate = st.number_input(
+            "적용환율 (USD/KRW)",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            value=None,
+            placeholder="0.00",
+            key="exchange_rate",
+            help="하나은행 환율정보 · 미국달러 현찰 살 때. 결재일을 바꾸면 해당 날짜 고시가 자동으로 들어옵니다.",
+        )
+        fx_quote = st.session_state.get("fx_quote")
+        if fx_quote:
+            st.caption(quote_caption(fx_quote, approval))
+        elif st.session_state.get("fx_loaded_for") == approval.isoformat():
+            st.caption("하나은행 환율을 가져오지 못했습니다. 미국달러 현찰 살 때를 직접 입력해 주세요.")
 
-            exchange_rate = st.number_input(
-                "적용환율 (USD/KRW)",
-                min_value=0.0,
-                step=0.01,
-                format="%.2f",
-                value=None,
-                placeholder="0.00",
-                key="exchange_rate",
-                help="하나은행 환율정보 · 미국달러 현찰 살 때. 결재일 기준으로 자동 조회되며 수정할 수 있습니다.",
-            )
-            fx_quote = st.session_state.get("fx_quote")
-            if fx_quote:
-                st.caption(quote_caption(fx_quote, approval))
-            elif st.session_state.get("fx_loaded_for") == approval.isoformat():
-                st.caption("하나은행 환율을 가져오지 못했습니다. 미국달러 현찰 살 때를 직접 입력해 주세요.")
-
+        with st.form("travel_calc"):
             air_c, air_p = st.columns([2, 2])
             with air_c:
                 airfare = st.number_input(
@@ -429,7 +441,7 @@ def main() -> None:
             with prep_p:
                 prep_pay = st.radio("준비금 지급방식", PAYMENT_METHODS, index=_payment_index(PAYMENT_CORPORATE), horizontal=True, key="prep_pay")
 
-        calculate = st.form_submit_button("여비 계산", type="primary", use_container_width=True)
+            calculate = st.form_submit_button("여비 계산", type="primary", use_container_width=True)
 
     if calculate:
         stays = [stay for stay in rendered_stays if stay.country or stay.city]

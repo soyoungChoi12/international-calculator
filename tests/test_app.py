@@ -133,6 +133,24 @@ def test_dates_default_to_today():
     assert _by_label(at.date_input, "출장신청서 결재일").value == today
 
 
+def test_changing_approval_date_loads_that_days_fx(monkeypatch):
+    from services.hana_fx import HanaFxQuote
+    from services import hana_fx
+
+    def fake_fetch(when: date):
+        rate = 1404.65 if when == date(2026, 8, 28) else 1382.88
+        return HanaFxQuote(rate=rate, posted_on=when, round_no=1, posted_at="10:00")
+
+    monkeypatch.setattr(hana_fx, "fetch_usd_cash_buy", fake_fetch)
+    at = AppTest.from_file(str(APP_PATH))
+    at.run()
+    _by_label(at.date_input, "출장신청서 결재일").set_value(date(2026, 8, 28))
+    at.run()
+    assert not at.exception
+    assert _by_label(at.number_input, "적용환율 (USD/KRW)").value == 1404.65
+    assert any("1,404.65원" in caption.value and "2026-08-28" in caption.value for caption in at.caption)
+
+
 def test_example_trip_shows_expected_totals():
     at = AppTest.from_file(str(APP_PATH))
     at.run()
