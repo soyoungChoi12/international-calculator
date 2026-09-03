@@ -11,6 +11,7 @@ from config.excel_mapping import FX_SOURCE_CAPTION
 from data.travel_rates import GRADES, PAYMENT_CORPORATE, PAYMENT_PERSONAL, PAYMENT_METHODS, ROLES
 from services.destination_grade_service import list_countries, resolve_destination_grade
 from services.excel_export import build_excel_bytes, excel_filename
+from services.hana_fx import fetch_usd_cash_buy, quote_caption
 from services.travel_calculator import (
     StayInput,
     TravelInput,
@@ -50,6 +51,16 @@ def _or_default(value, default):
 
 def _payment_index(method: str) -> int:
     return list(PAYMENT_METHODS).index(method)
+
+
+def _apply_hana_fx(approval: date) -> None:
+    """결재일이 바뀌면 하나은행 미국달러 현찰 살 때를 적용환율에 넣는다."""
+    if st.session_state.get("fx_loaded_for") == approval.isoformat():
+        return
+    quote = fetch_usd_cash_buy(approval)
+    st.session_state.fx_loaded_for = approval.isoformat()
+    st.session_state.fx_quote = quote
+    st.session_state.exchange_rate = quote.rate if quote else None
 
 
 def _init_stay_ids() -> None:
@@ -294,6 +305,7 @@ def main() -> None:
             return_on = st.date_input("귀국일", value=today, key="return_date")
         with date_col3:
             approval = st.date_input("출장신청서 결재일", value=today, key="approval_date", help="환율 조회 기준일")
+        _apply_hana_fx(approval)
 
         trip_days = calculate_trip_days(departure, return_on) if return_on >= departure else 0
         suggested_nights = max(trip_days - 1, 0)
@@ -378,8 +390,13 @@ def main() -> None:
                 value=None,
                 placeholder="0.00",
                 key="exchange_rate",
-                help="하나은행 환율정보 · 미국달러 현찰 살 때. 자동조회는 다음 단계에서 연결합니다.",
+                help="하나은행 환율정보 · 미국달러 현찰 살 때. 결재일 기준으로 자동 조회되며 수정할 수 있습니다.",
             )
+            fx_quote = st.session_state.get("fx_quote")
+            if fx_quote:
+                st.caption(quote_caption(fx_quote, approval))
+            elif st.session_state.get("fx_loaded_for") == approval.isoformat():
+                st.caption("하나은행 환율을 가져오지 못했습니다. 미국달러 현찰 살 때를 직접 입력해 주세요.")
 
             air_c, air_p = st.columns([2, 2])
             with air_c:
@@ -421,7 +438,7 @@ def main() -> None:
             st.session_state.pop("calc_result", None)
             return
         if _or_default(exchange_rate, 0) <= 0:
-            st.error("적용환율을 입력해 주세요. (자동조회 연결 전까지는 직접 입력합니다.)")
+            st.error("적용환율을 입력해 주세요.")
             st.session_state.pop("calc_result", None)
             return
 

@@ -52,7 +52,7 @@ def test_example_trip_fills_left_and_grade_a_block():
     assert ws["L4"].value == 1400
     assert ws["M4"].value == "현찰 살 때(26.08.31)"
     assert ws["K3"].value == "하나은행 환율정보"
-    assert ws["K3"].hyperlink.target == "https://www.kebhana.com/cont/mall/mall15/mall1501/index.jsp"
+    assert ws["K3"].hyperlink.target == "https://biz.kebhana.com/foex/rate/index.do?menuItemId=wcfxd740_101i#//HanaBank"
     assert "미국달러 현찰 살 때" in str(ws["M3"].value)
     assert ws["J7"].value == 5
     assert ws["I7"].value == 26
