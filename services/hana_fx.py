@@ -5,20 +5,33 @@ from __future__ import annotations
 import http.cookiejar
 import os
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime
 from html.parser import HTMLParser
+from pathlib import Path
 
 HANA_FX_PAGE_URL = (
     "https://biz.kebhana.com/foex/rate/index.do?menuItemId=wcfxd740_101i#//HanaBank"
 )
 HANA_FX_LOOKUP_URL = "https://www.kebhana.com/cms/rate/wpfxd651_01i_01.do"
 HANA_FX_REFERER = "https://www.kebhana.com/cms/rate/index.do?contentUrl=/cms/rate/wpfxd651_01i.do"
-_TIMEOUT_SEC = 4
+NAVER_FX_URL = (
+    "https://finance.naver.com/marketindex/exchangeDailyQuote.naver?marketindexCd=FX_USDKRW&page={page}"
+)
+_TIMEOUT_SEC = 6
 _MAX_TRIES = 2
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html, */*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+}
 
 
 @dataclass(frozen=True)
@@ -27,6 +40,7 @@ class HanaFxQuote:
     posted_on: date
     round_no: int | None = None
     posted_at: str | None = None
+    source: str = "hana"
 
 
 _QUOTE_CACHE: dict[str, HanaFxQuote] = {}
@@ -111,6 +125,22 @@ def _as_date(when: date | datetime) -> date:
     return when
 
 
+def _running_on_streamlit_cloud() -> bool:
+    return Path("/mount/src").exists() or Path("/home/appuser").exists()
+
+
+def _urlopen(request: urllib.request.Request, timeout: int = _TIMEOUT_SEC):
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(timeout)
+    try:
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+        )
+        return opener.open(request, timeout=timeout)
+    finally:
+        socket.setdefaulttimeout(previous)
+
+
 def _post_rate_html(when: date) -> str:
     payload = urllib.parse.urlencode(
         {
@@ -126,21 +156,84 @@ def _post_rate_html(when: date) -> str:
             "requestTarget": "searchContentDiv",
         }
     ).encode()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     request = urllib.request.Request(
         HANA_FX_LOOKUP_URL,
         data=payload,
         method="POST",
         headers={
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "text/html, */*;q=0.8",
+            **_BROWSER_HEADERS,
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Origin": "https://www.kebhana.com",
             "Referer": HANA_FX_REFERER,
-            "Connection": "close",
+            "X-Requested-With": "XMLHttpRequest",
         },
     )
-    with opener.open(request, timeout=_TIMEOUT_SEC) as response:
+    with _urlopen(request) as response:
         return response.read().decode("utf-8", errors="replace")
+
+
+def parse_naver_usd_cash_buy_rows(html: str) -> list[HanaFxQuote]:
+    """네이버 금융 일별 환율 표에서 현찰 사실 때(하나은행)를 읽는다."""
+    parser = _RateTableParser()
+    parser.feed(html)
+    quotes: list[HanaFxQuote] = []
+    for row in parser.rows:
+        if not row or not re.fullmatch(r"\d{4}\.\d{2}\.\d{2}", row[0]):
+            continue
+        raw = row[0]
+        posted_on = date(int(raw[:4]), int(raw[5:7]), int(raw[8:10]))
+        cash_buy = _parse_number(row[3]) if len(row) > 3 else None
+        if cash_buy is None:
+            continue
+        quotes.append(HanaFxQuote(rate=cash_buy, posted_on=posted_on, source="naver"))
+    return quotes
+
+
+def _get_naver_html(page: int) -> str:
+    request = urllib.request.Request(
+        NAVER_FX_URL.format(page=page),
+        headers=_BROWSER_HEADERS,
+    )
+    with _urlopen(request) as response:
+        raw = response.read()
+    for encoding in ("utf-8", "cp949", "euc-kr"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("cp949", errors="replace")
+
+
+def _fetch_hana_usd_cash_buy(when: date) -> HanaFxQuote | None:
+    quote = None
+    for _ in range(_MAX_TRIES):
+        try:
+            html = _post_rate_html(when)
+        except (urllib.error.URLError, TimeoutError, OSError):
+            continue
+        quote = parse_usd_cash_buy(html)
+        if quote:
+            break
+    return quote
+
+
+def _fetch_naver_usd_cash_buy(when: date) -> HanaFxQuote | None:
+    best: HanaFxQuote | None = None
+    for page in range(1, 9):
+        try:
+            html = _get_naver_html(page)
+        except (urllib.error.URLError, TimeoutError, OSError):
+            break
+        rows = parse_naver_usd_cash_buy_rows(html)
+        if not rows:
+            break
+        for quote in rows:
+            if quote.posted_on <= when and (best is None or quote.posted_on > best.posted_on):
+                best = quote
+        oldest = min(item.posted_on for item in rows)
+        if oldest <= when:
+            return best
+    return best
 
 
 def peek_cached_usd_cash_buy(when: date) -> HanaFxQuote | None:
@@ -157,13 +250,12 @@ def fetch_usd_cash_buy(when: date) -> HanaFxQuote | None:
         return cached
     if _should_skip_network():
         return None
+    sources = (_fetch_naver_usd_cash_buy, _fetch_hana_usd_cash_buy)
+    if not _running_on_streamlit_cloud():
+        sources = (_fetch_hana_usd_cash_buy, _fetch_naver_usd_cash_buy)
     quote = None
-    for _ in range(_MAX_TRIES):
-        try:
-            html = _post_rate_html(when)
-        except (urllib.error.URLError, TimeoutError, OSError):
-            continue
-        quote = parse_usd_cash_buy(html)
+    for loader in sources:
+        quote = loader(when)
         if quote:
             break
     if quote:

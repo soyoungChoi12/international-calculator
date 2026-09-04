@@ -77,3 +77,55 @@ def test_peek_cached_usd_cash_buy_does_not_hit_network(monkeypatch):
     finally:
         hana_fx._QUOTE_CACHE.clear()
         hana_fx._QUOTE_CACHE.update(original)
+
+
+SAMPLE_NAVER_HTML = """
+<table>
+<thead>
+<tr><th>날짜</th><th>매매기준율</th><th>전일대비</th><th>사실 때</th><th>파실 때</th></tr>
+</thead>
+<tbody>
+<tr>
+<td class="date">2026.09.04</td>
+<td class="num">1,358.00</td>
+<td class="num">0.50</td>
+<td>1,381.76</td>
+<td>1,334.24</td>
+</tr>
+<tr>
+<td class="date">2026.09.03</td>
+<td class="num">1,358.50</td>
+<td class="num">1.80</td>
+<td>1,382.27</td>
+<td>1,334.73</td>
+</tr>
+</tbody>
+</table>
+"""
+
+
+def test_parse_naver_usd_cash_buy_uses_cash_buy_column():
+    from services.hana_fx import parse_naver_usd_cash_buy_rows
+
+    rows = parse_naver_usd_cash_buy_rows(SAMPLE_NAVER_HTML)
+    assert rows[0].rate == 1381.76
+    assert rows[0].posted_on == date(2026, 9, 4)
+    assert rows[0].source == "naver"
+
+
+def test_fetch_falls_back_to_naver_when_hana_fails(monkeypatch):
+    from services import hana_fx
+    from services.hana_fx import HanaFxQuote
+
+    original = dict(hana_fx._QUOTE_CACHE)
+    hana_fx._QUOTE_CACHE.clear()
+    fallback = HanaFxQuote(rate=1381.76, posted_on=date(2026, 9, 4), source="naver")
+    monkeypatch.setattr(hana_fx, "_should_skip_network", lambda: False)
+    monkeypatch.setattr(hana_fx, "_running_on_streamlit_cloud", lambda: True)
+    monkeypatch.setattr(hana_fx, "_fetch_hana_usd_cash_buy", lambda when: (_ for _ in ()).throw(AssertionError("hana")))
+    monkeypatch.setattr(hana_fx, "_fetch_naver_usd_cash_buy", lambda when: fallback)
+    try:
+        assert hana_fx.fetch_usd_cash_buy(date(2026, 9, 4)) == fallback
+    finally:
+        hana_fx._QUOTE_CACHE.clear()
+        hana_fx._QUOTE_CACHE.update(original)

@@ -446,7 +446,10 @@ def main() -> None:
         if fx_quote:
             st.caption(quote_caption(fx_quote, approval))
         elif st.session_state.get("fx_fetch_failed_for") == approval.isoformat():
-            st.caption("하나은행 환율을 가져오지 못했습니다. 미국달러 현찰 살 때를 직접 입력하거나, 결재일을 다시 선택해 주세요.")
+            st.caption("하나은행 환율을 가져오지 못했습니다. 미국달러 현찰 살 때를 직접 입력하거나, 다시 조회해 주세요.")
+            if st.button("환율 다시 조회"):
+                st.session_state.pop("fx_fetch_failed_for", None)
+                st.rerun()
         else:
             st.caption("하나은행 환율을 조회하는 중입니다.")
 
