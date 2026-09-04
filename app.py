@@ -64,24 +64,44 @@ def _fx_input_key() -> str:
     return f"exchange_rate_{st.session_state.get('fx_widget_id', 0)}"
 
 
-def _sync_fx_for_approval(approval: date) -> None:
-    """결재일에 맞는 하나은행 현찰 살 때를 적용환율 칸에 넣는다.
-
-    환율 number_input은 한 번 만들어진 뒤에는 값을 덮어쓸 수 없어서,
-    날짜가 바뀔 때마다 위젯 키를 바꿔 새로 만든다.
-    """
+def _fx_is_loaded(approval: date) -> bool:
     approval = _as_date(approval)
-    loaded = st.session_state.get("fx_loaded_for")
-    if loaded == approval.isoformat() and st.session_state.get("fx_quote") is not None:
-        return
-    quote = hana_fx.fetch_usd_cash_buy(approval)
+    return (
+        st.session_state.get("fx_loaded_for") == approval.isoformat()
+        and st.session_state.get("fx_quote") is not None
+    )
+
+
+def _apply_fx_quote(approval: date, quote: hana_fx.HanaFxQuote) -> None:
+    approval = _as_date(approval)
     st.session_state.fx_quote = quote
-    if quote is None:
-        return
     st.session_state.fx_loaded_for = approval.isoformat()
+    st.session_state.pop("fx_fetch_failed_for", None)
     next_id = int(st.session_state.get("fx_widget_id", 0)) + 1
     st.session_state.fx_widget_id = next_id
     st.session_state[f"exchange_rate_{next_id}"] = float(quote.rate)
+
+
+def _apply_cached_fx(approval: date) -> None:
+    """이미 받아 둔 환율만 즉시 반영한다. 네트워크는 타지 않는다."""
+    if _fx_is_loaded(approval):
+        return
+    cached = hana_fx.peek_cached_usd_cash_buy(approval)
+    if cached:
+        _apply_fx_quote(approval, cached)
+
+
+def _sync_fx_for_approval(approval: date) -> None:
+    """결재일에 맞는 하나은행 현찰 살 때를 적용환율 칸에 넣는다."""
+    approval = _as_date(approval)
+    if _fx_is_loaded(approval):
+        return
+    quote = hana_fx.fetch_usd_cash_buy(approval)
+    if quote is None:
+        st.session_state.fx_quote = None
+        st.session_state.fx_fetch_failed_for = approval.isoformat()
+        return
+    _apply_fx_quote(approval, quote)
 
 
 def _init_stay_ids() -> None:
@@ -333,7 +353,7 @@ def main() -> None:
                     help="환율 조회 기준일. 날짜를 바꾸면 해당일 하나은행 미국달러 현찰 살 때를 다시 조회합니다.",
                 )
             )
-        _sync_fx_for_approval(approval)
+        _apply_cached_fx(approval)
 
         trip_days = calculate_trip_days(departure, return_on) if return_on >= departure else 0
         suggested_nights = max(trip_days - 1, 0)
@@ -402,6 +422,10 @@ def main() -> None:
                 "체류일 합계는 출장일수와 같아야 하며, 엑셀에서는 등급별로 칸이 나뉩니다."
             )
 
+    if not _fx_is_loaded(approval) and st.session_state.get("fx_fetch_failed_for") != approval.isoformat():
+        with st.spinner("하나은행 환율 조회 중..."):
+            _sync_fx_for_approval(approval)
+
     with st.container(border=True):
         st.subheader("2. 비용 및 지급정보")
         st.caption(
@@ -421,8 +445,10 @@ def main() -> None:
         fx_quote = st.session_state.get("fx_quote")
         if fx_quote:
             st.caption(quote_caption(fx_quote, approval))
-        elif st.session_state.get("fx_loaded_for") != approval.isoformat():
+        elif st.session_state.get("fx_fetch_failed_for") == approval.isoformat():
             st.caption("하나은행 환율을 가져오지 못했습니다. 미국달러 현찰 살 때를 직접 입력하거나, 결재일을 다시 선택해 주세요.")
+        else:
+            st.caption("하나은행 환율을 조회하는 중입니다.")
 
         with st.form("travel_calc"):
             air_c, air_p = st.columns([2, 2])

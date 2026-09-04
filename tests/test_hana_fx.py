@@ -61,3 +61,19 @@ def test_fetch_is_skipped_during_pytest():
     from services.hana_fx import fetch_usd_cash_buy
 
     assert fetch_usd_cash_buy(date(2026, 9, 3)) is None
+
+
+def test_peek_cached_usd_cash_buy_does_not_hit_network(monkeypatch):
+    from services import hana_fx
+
+    quote = hana_fx.parse_usd_cash_buy(SAMPLE_HTML)
+    original = dict(hana_fx._QUOTE_CACHE)
+    hana_fx._QUOTE_CACHE.clear()
+    hana_fx._QUOTE_CACHE[date(2026, 9, 3).isoformat()] = quote
+    monkeypatch.setattr(hana_fx, "_post_rate_html", lambda when: (_ for _ in ()).throw(AssertionError("network")))
+    try:
+        assert hana_fx.peek_cached_usd_cash_buy(date(2026, 9, 3)) == quote
+        assert hana_fx.fetch_usd_cash_buy(date(2026, 9, 3)) == quote
+    finally:
+        hana_fx._QUOTE_CACHE.clear()
+        hana_fx._QUOTE_CACHE.update(original)

@@ -17,8 +17,8 @@ HANA_FX_PAGE_URL = (
 )
 HANA_FX_LOOKUP_URL = "https://www.kebhana.com/cms/rate/wpfxd651_01i_01.do"
 HANA_FX_REFERER = "https://www.kebhana.com/cms/rate/index.do?contentUrl=/cms/rate/wpfxd651_01i.do"
-_TIMEOUT_SEC = 8
-_MAX_TRIES = 3
+_TIMEOUT_SEC = 4
+_MAX_TRIES = 2
 
 
 @dataclass(frozen=True)
@@ -141,6 +141,12 @@ def _post_rate_html(when: date) -> str:
     )
     with opener.open(request, timeout=_TIMEOUT_SEC) as response:
         return response.read().decode("utf-8", errors="replace")
+
+
+def peek_cached_usd_cash_buy(when: date) -> HanaFxQuote | None:
+    """네트워크 없이 이미 조회해 둔 환율만 반환한다."""
+    when = _as_date(when)
+    return _QUOTE_CACHE.get(when.isoformat())
 
 
 def fetch_usd_cash_buy(when: date) -> HanaFxQuote | None:
