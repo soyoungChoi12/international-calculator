@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import replace
 from datetime import date, datetime
 
@@ -12,7 +13,14 @@ from data.travel_rates import GRADES, PAYMENT_CORPORATE, PAYMENT_PERSONAL, PAYME
 from services.destination_grade_service import list_countries, resolve_destination_grade
 from services.excel_export import build_excel_bytes, excel_filename
 from services.hana_fx import quote_caption
-from services import hana_fx
+from services import cfb_writer, hana_fx, hwp_export, plan_parser
+
+importlib.reload(plan_parser)
+importlib.reload(cfb_writer)
+importlib.reload(hwp_export)
+
+from services.hwp_export import build_hwp_bytes, hwp_filename
+from services.plan_parser import PlanDocument, parse_plan_pdf, parse_plan_text
 from services.travel_calculator import (
     StayInput,
     TravelInput,
@@ -111,6 +119,130 @@ def _init_stay_ids() -> None:
     if "rental_ids" not in st.session_state:
         st.session_state.rental_ids = []
         st.session_state.next_rental_id = 0
+    if "calc_results" not in st.session_state:
+        st.session_state.calc_results = {}
+
+
+def _plan_traveler_label(traveler) -> str:
+    extra = traveler.title or traveler.role
+    return f"{traveler.name} ({extra})" if extra else traveler.name
+
+
+def _refresh_plan_document(plan: PlanDocument | None) -> PlanDocument | None:
+    """세션에 남은 이전 계획안도 현재 필드로 다시 읽는다."""
+    if plan is None:
+        return None
+    if hasattr(plan, "purpose_lines") and hasattr(plan, "itinerary") and hasattr(plan, "airfare_note"):
+        return plan
+    raw = getattr(plan, "raw_text", "") or ""
+    if raw:
+        return parse_plan_text(raw)
+    return plan
+
+
+def _apply_plan_to_form(plan: PlanDocument, traveler_index: int = 0) -> None:
+    _init_stay_ids()
+    travelers = plan.travelers
+    if travelers:
+        traveler_index = max(0, min(traveler_index, len(travelers) - 1))
+        person = travelers[traveler_index]
+        st.session_state.traveler_name = person.name
+        st.session_state.traveler_role = person.role
+        st.session_state.plan_traveler_pick = _plan_traveler_label(person)
+        st.session_state.plan_traveler_title = person.title
+        st.session_state.plan_traveler_team = person.team
+    st.session_state.plan_document = plan
+    st.session_state.plan_traveler_index = traveler_index
+    if plan.departure:
+        st.session_state.departure_date = plan.departure
+    if plan.return_on:
+        st.session_state.return_date = plan.return_on
+    stay_id = st.session_state.stay_ids[0]
+    if plan.country:
+        st.session_state[f"stay_country_{stay_id}"] = plan.country
+    if plan.city:
+        st.session_state[f"stay_city_{stay_id}"] = plan.city
+    if plan.airfare_krw:
+        st.session_state.airfare = int(plan.airfare_krw)
+    if plan.preparation_krw:
+        st.session_state.preparation = int(plan.preparation_krw)
+    departure = plan.departure or st.session_state.get("departure_date")
+    return_on = plan.return_on or st.session_state.get("return_date")
+    if departure and return_on:
+        trip_days = calculate_trip_days(departure, return_on) if return_on >= departure else 0
+        nights = plan.nights if plan.nights is not None else max(trip_days - 1, 0)
+        st.session_state[f"stay_nights_{stay_id}_{departure}_{return_on}"] = nights
+        st.session_state[f"stay_days_{stay_id}_{departure}_{return_on}"] = trip_days
+
+
+def _on_plan_traveler_change() -> None:
+    plan = st.session_state.get("plan_document")
+    if not plan or not plan.travelers:
+        return
+    labels = [_plan_traveler_label(item) for item in plan.travelers]
+    picked = st.session_state.get("plan_traveler_pick")
+    if picked not in labels:
+        return
+    _apply_plan_to_form(plan, labels.index(picked))
+
+
+def _render_plan_loader() -> None:
+    with st.container(border=True):
+        st.subheader("0. 계획안")
+        st.caption("계획안 PDF를 첨부하면 출장자·일정·출장지·항공료·준비금을 채웁니다. 여비 계산 후 Excel과 국외출장 심사신청서(HWP)를 함께 받습니다.")
+        uploaded = st.file_uploader("계획안 PDF 첨부", type=["pdf"])
+        load_clicked = st.button(
+            "계획안 불러오기",
+            type="primary",
+            use_container_width=True,
+            disabled=uploaded is None,
+        )
+        if load_clicked and uploaded is not None:
+            try:
+                plan = parse_plan_pdf(uploaded.getvalue())
+            except Exception as exc:
+                st.error(f"PDF를 읽지 못했습니다. {exc}")
+            else:
+                _apply_plan_to_form(plan)
+                st.rerun()
+
+        plan = _refresh_plan_document(st.session_state.get("plan_document"))
+        if plan is not None:
+            st.session_state.plan_document = plan
+        if not plan:
+            return
+        lines = []
+        if plan.purpose:
+            lines.append(f"- 출장목적: {plan.purpose}")
+        if plan.region:
+            lines.append(f"- 출장지역: {plan.region}")
+        if plan.schedule_text:
+            lines.append(f"- 출장일정: {plan.schedule_text}")
+        if plan.event_name:
+            lines.append(f"- 방문기관/행사명: {plan.event_name}")
+        if plan.travelers:
+            people = ", ".join(_plan_traveler_label(item) for item in plan.travelers)
+            lines.append(f"- 출장자: {people}")
+        if plan.budget_category:
+            lines.append(f"- 예산과목: {plan.budget_category}")
+        place = " ".join(part for part in (plan.country, plan.city) if part) or "-"
+        grade = f" ({plan.grade}급)" if plan.grade else ""
+        lines.append(f"- 계산 반영: {place}{grade} · 항공료 {plan.airfare_krw:,}원 · 준비금 {plan.preparation_krw:,}원")
+        st.markdown("**불러온 항목**")
+        st.write("\n".join(lines))
+        if plan.grade_message:
+            st.success(plan.grade_message)
+        for warn in plan.warnings:
+            st.warning(warn)
+        if len(plan.travelers) > 1:
+            labels = [_plan_traveler_label(item) for item in plan.travelers]
+            st.radio(
+                "계산할 출장자",
+                options=labels,
+                key="plan_traveler_pick",
+                on_change=_on_plan_traveler_change,
+                help="출장자마다 여비를 따로 계산하고, Excel·심사신청서도 따로 받습니다.",
+            )
 
 
 def _add_stay() -> None:
@@ -332,11 +464,12 @@ def main() -> None:
         '<p class="hint">경기창조경제혁신센터 지침(2026.08.10.)</p>',
         unsafe_allow_html=True,
     )
+    _render_plan_loader()
 
     with st.container(border=True):
         st.subheader("1. 출장 기본정보")
-        name = st.text_input("출장자명", placeholder="예: 홍길동", help="Excel 본문에는 넣지 않고, 다운로드 파일명에 사용합니다.")
-        role = st.selectbox("출장자 구분", options=list(ROLES), index=2)
+        name = st.text_input("출장자명", placeholder="예: 홍길동", key="traveler_name", help="Excel 본문에는 넣지 않고, 다운로드 파일명에 사용합니다.")
+        role = st.selectbox("출장자 구분", options=list(ROLES), index=2, key="traveler_role")
 
         date_col1, date_col2, date_col3 = st.columns(3)
         today = date.today()
@@ -524,14 +657,23 @@ def main() -> None:
 
         result = calculate_travel(inp)
         approval_date = approval
-        st.session_state["calc_result"] = {
+        packed = {
             "name": name.strip(),
+            "title": (st.session_state.get("plan_traveler_title") or "").strip(),
+            "team": (st.session_state.get("plan_traveler_team") or "").strip(),
             "approval": approval_date.isoformat(),
+            "departure": departure.isoformat(),
+            "return_on": return_on.isoformat(),
             "warnings": result.warnings,
             "result": result,
         }
+        st.session_state["calc_result"] = packed
+        st.session_state.calc_results[name.strip() or "_"] = packed
 
-    packed = st.session_state.get("calc_result")
+    current_name = (name or "").strip() or "_"
+    packed = st.session_state.get("calc_results", {}).get(current_name)
+    if packed is None and not st.session_state.get("plan_document"):
+        packed = st.session_state.get("calc_result")
     if not packed:
         return
 
@@ -593,21 +735,64 @@ def main() -> None:
             st.warning(warn)
 
         excel_name = excel_filename(packed["name"], date.fromisoformat(packed["approval"]))
+        approval_date = date.fromisoformat(packed["approval"])
         try:
-            excel_bytes = build_excel_bytes(result, packed["name"], date.fromisoformat(packed["approval"]))
+            excel_bytes = build_excel_bytes(result, packed["name"], approval_date)
         except FileNotFoundError:
             excel_bytes = None
-        if excel_bytes:
-            st.download_button(
-                "Excel 다운로드",
-                data=excel_bytes,
-                file_name=excel_name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                use_container_width=True,
+        plan = _refresh_plan_document(st.session_state.get("plan_document"))
+        if plan is not None:
+            st.session_state.plan_document = plan
+        title = packed.get("title") or ""
+        team = packed.get("team") or ""
+        if (not title or not team) and plan and plan.travelers:
+            person = next((item for item in plan.travelers if item.name == packed["name"]), plan.travelers[0])
+            title = title or person.title
+            team = team or person.team
+        departure = date.fromisoformat(packed["departure"]) if packed.get("departure") else None
+        return_on = date.fromisoformat(packed["return_on"]) if packed.get("return_on") else None
+        hwp_error = ""
+        try:
+            hwp_bytes = build_hwp_bytes(
+                result,
+                packed["name"],
+                title=title,
+                team=team,
+                plan=plan,
+                departure=departure,
+                return_on=return_on,
+                approval_date=approval_date,
             )
-        else:
-            st.info("Excel 파일을 만들 수 없습니다. 여비 계산을 다시 실행해 주세요.")
+        except Exception as exc:
+            hwp_bytes = None
+            hwp_error = str(exc)
+        hwp_name = hwp_filename(packed["name"], title, approval_date)
+        down_col1, down_col2 = st.columns(2)
+        with down_col1:
+            if excel_bytes:
+                st.download_button(
+                    "Excel 다운로드",
+                    data=excel_bytes,
+                    file_name=excel_name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True,
+                )
+            else:
+                st.info("Excel 파일을 만들 수 없습니다. 여비 계산을 다시 실행해 주세요.")
+        with down_col2:
+            if hwp_bytes:
+                st.download_button(
+                    "심사신청서(HWP) 다운로드",
+                    data=hwp_bytes,
+                    file_name=hwp_name,
+                    mime="application/x-hwp",
+                    use_container_width=True,
+                )
+            elif hwp_error:
+                st.error(f"심사신청서를 만들지 못했습니다. {hwp_error}")
+            else:
+                st.info("심사신청서 파일을 만들 수 없습니다. 여비 계산을 다시 실행해 주세요.")
 
 
 main()

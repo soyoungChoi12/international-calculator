@@ -194,3 +194,61 @@ def test_example_trip_shows_expected_totals():
     assert "**750,000원**" in markdown
     assert "**70,000원**" in markdown
     assert any(button.label == "Excel 다운로드" for button in at.download_button)
+    assert any(button.label == "심사신청서(HWP) 다운로드" for button in at.download_button)
+
+
+def test_plan_upload_section_is_visible():
+    at = AppTest.from_file(str(APP_PATH))
+    at.run()
+    assert any(item.value == "0. 계획안" for item in at.subheader)
+    assert any(button.label == "계획안 불러오기" for button in at.button)
+
+
+def test_plan_session_prefills_traveler_and_trip():
+    at = AppTest.from_file(str(APP_PATH))
+    at.session_state["traveler_name"] = "이한주"
+    at.session_state["traveler_role"] = "팀장 및 팀원"
+    at.session_state["departure_date"] = date(2026, 6, 30)
+    at.session_state["return_date"] = date(2026, 7, 3)
+    at.session_state["stay_country_0"] = "일본"
+    at.session_state["stay_city_0"] = "교토"
+    at.session_state["airfare"] = 520_300
+    at.session_state["preparation"] = 150_000
+    at.run()
+    assert not at.exception
+    assert _by_label(at.text_input, "출장자명").value == "이한주"
+    assert _by_label(at.selectbox, "출장자 구분").value == "팀장 및 팀원"
+    assert _by_label(at.date_input, "출국일").value == date(2026, 6, 30)
+    assert _by_label(at.date_input, "귀국일").value == date(2026, 7, 3)
+    assert _by_label(at.selectbox, "출장 국가").value == "일본"
+    assert _by_label(at.text_input, "출장 도시").value == "교토"
+    assert _by_label(at.number_input, "항공료 (원)").value == 520_300
+    assert _by_label(at.number_input, "준비금 (원)").value == 150_000
+    assert any("일본 → 나" in item.value for item in at.success)
+
+
+def test_calculate_with_stale_plan_session_does_not_crash():
+    from types import SimpleNamespace
+
+    from tests.test_plan_parser import SAMPLE_PLAN
+
+    at = AppTest.from_file(str(APP_PATH))
+    at.session_state["plan_document"] = SimpleNamespace(raw_text=SAMPLE_PLAN)
+    at.run()
+    assert not at.exception
+
+    _by_label(at.date_input, "출국일").set_value(date(2026, 6, 30))
+    _by_label(at.date_input, "귀국일").set_value(date(2026, 7, 3))
+    at.run()
+    _by_label(at.text_input, "출장자명").set_value("이한주")
+    _by_label(at.selectbox, "출장 국가").select("일본")
+    _by_label(at.text_input, "출장 도시").set_value("교토")
+    _by_label(at.number_input, "적용환율 (USD/KRW)").set_value(1535.0)
+    _by_label(at.number_input, "항공료 (원)").set_value(520_300)
+    _by_label(at.number_input, "준비금 (원)").set_value(150_000)
+    next(button for button in at.button if button.label == "여비 계산").click()
+    at.run()
+    assert not at.exception
+    assert not at.error
+    assert any(button.label == "Excel 다운로드" for button in at.download_button)
+    assert any(button.label == "심사신청서(HWP) 다운로드" for button in at.download_button)
