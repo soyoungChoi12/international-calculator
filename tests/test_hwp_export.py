@@ -28,6 +28,84 @@ def _kyoto_input() -> TravelInput:
     )
 
 
+def _body_texts(data: bytes) -> list[str]:
+    import zlib
+
+    from services.hwp_export import HWPTAG_PARA_TEXT, _iter_records, _visible_text
+
+    ole = olefile.OleFileIO(BytesIO(data))
+    raw = ole.openstream("BodyText/Section0").read()
+    ole.close()
+    body = None
+    for wbits in (-15, 15, zlib.MAX_WBITS):
+        try:
+            body = zlib.decompress(raw, wbits)
+            break
+        except zlib.error:
+            continue
+    assert body is not None
+    texts = []
+    for _header, tag, _level, _extra, payload in _iter_records(body):
+        if tag != HWPTAG_PARA_TEXT:
+            continue
+        visible = _visible_text(payload)
+        if visible.strip():
+            texts.append(visible)
+    return texts
+
+
+def _cell_nparas(data: bytes, needle: str) -> int | None:
+    import struct
+    import zlib
+
+    from services.hwp_export import HWPTAG_LIST_HEADER, HWPTAG_PARA_TEXT, _iter_records, _visible_text
+
+    ole = olefile.OleFileIO(BytesIO(data))
+    raw = ole.openstream("BodyText/Section0").read()
+    ole.close()
+    body = None
+    for wbits in (-15, 15, zlib.MAX_WBITS):
+        try:
+            body = zlib.decompress(raw, wbits)
+            break
+        except zlib.error:
+            continue
+    assert body is not None
+    last_nparas = None
+    for _header, tag, _level, _extra, payload in _iter_records(body):
+        if tag == HWPTAG_LIST_HEADER and len(payload) >= 4:
+            last_nparas = struct.unpack_from("<I", payload, 0)[0]
+        elif tag == HWPTAG_PARA_TEXT and needle in _visible_text(payload):
+            return last_nparas
+    return None
+
+
+def _cell_nparas_exact(data: bytes, needle: str) -> int | None:
+    import struct
+    import zlib
+
+    from services.hwp_export import HWPTAG_LIST_HEADER, HWPTAG_PARA_TEXT, _iter_records, _visible_text
+
+    ole = olefile.OleFileIO(BytesIO(data))
+    raw = ole.openstream("BodyText/Section0").read()
+    ole.close()
+    body = None
+    for wbits in (-15, 15, zlib.MAX_WBITS):
+        try:
+            body = zlib.decompress(raw, wbits)
+            break
+        except zlib.error:
+            continue
+    assert body is not None
+    last_nparas = None
+    for _header, tag, _level, _extra, payload in _iter_records(body):
+        if tag == HWPTAG_LIST_HEADER and len(payload) >= 4:
+            last_nparas = struct.unpack_from("<I", payload, 0)[0]
+        elif tag == HWPTAG_PARA_TEXT and _visible_text(payload).strip() == needle:
+            return last_nparas
+    return None
+
+
 def _prv_text(data: bytes) -> str:
     ole = olefile.OleFileIO(BytesIO(data))
     text = ole.openstream("PrvText").read().decode("utf-16le")
@@ -80,15 +158,16 @@ def test_kyoto_fields_match_example_shape():
     assert "2026.6.30.(화).~2026.7.3(금), 3박 4일 일정" in fields["schedule"]
     assert "IVS 2026 Kyoto" in fields["event"]
     assert fields["traveler"] == "◦ 글로벌본부 글로벌전략협업팀 이한주 전임"
-    assert fields["budget_who"] == "이한주 전임"
-    assert "총 1,727천원(나 지역, 3박 4일)" in fields["budget"]
-    assert "왕복항공료 : 520천원 (김포 - 간사이공항)" in fields["budget"]
-    assert "대중교통운임비(공항) : 30천원" in fields["budget"]
-    assert "숙박비 : 566천원($123x3=$369)" in fields["budget"]
-    assert "일  비 : 160천원($26x4=$104)" in fields["budget"]
-    assert "식  비 : 301천원($49x4=$196)" in fields["budget"]
-    assert "여행자보험비 : 70천원" in fields["budget"]
-    assert "오사카-교토 왕복기차비 : 80천원" in fields["budget"]
+    assert fields["budget_who"] == "이한주\n전임"
+    assert fields["category_who"] == "출장자 1인"
+    assert "총 1,727,210원(나 지역, 3박 4일)" in fields["budget"]
+    assert "왕복항공료 : 520,300원 (김포 - 간사이공항)" in fields["budget"]
+    assert "대중교통운임비(공항) : 30,000원" in fields["budget"]
+    assert "숙박비 : 566,410원($123x3=$369)" in fields["budget"]
+    assert "일  비 : 159,640원($26x4=$104)" in fields["budget"]
+    assert "식  비 : 300,860원($49x4=$196)" in fields["budget"]
+    assert "여행자보험비 : 70,000원" in fields["budget"]
+    assert "오사카-교토 왕복기차비 : 80,000원" in fields["budget"]
     assert "실비 정산 예정" in fields["budget"]
     assert "AroundX" in fields["category"]
 
@@ -114,9 +193,10 @@ def test_build_hwp_bytes_writes_preview_and_body():
     assert ole.exists("BodyText/Section0")
     assert ole.exists("FileHeader")
     ole.close()
-
-
-def test_sample_pdf_fills_hwp_like_example():
+    texts = _body_texts(data)
+    assert any("3박 4일" in item and "김포에서" not in item for item in texts)
+    assert any("귀국" in item or "김포" in item for item in texts)
+    assert all("\n" not in item for item in texts)
     path = (
         __import__("pathlib").Path(r"c:\Users\ccei\Desktop\참고\해외여비계산기\피드백")
         / "2026년 AroundX 정글 - 해외GTM 프로그램 참가기업 지원 계획(안) (수정).pdf"
@@ -156,7 +236,30 @@ def test_sample_pdf_fills_hwp_like_example():
     )
     preview = _prv_text(data)
     assert "IVS 2026 Kyoto" in preview
-    assert "1,727천원" in preview
+    assert "1,727,210원" in preview
+    texts = _body_texts(data)
+    purpose_lines = [item for item in texts if "AroundX 정글" in item or "VC/CVC" in item]
+    assert len(purpose_lines) >= 2
+    assert all("\n" not in item for item in purpose_lines)
+    assert any("김포에서 교토" in item and "3박 4일" not in item for item in texts)
+    assert any("왕복항공료" in item and "교통비 :" not in item for item in texts)
+    assert any("여행자보험비" in item and "준비금" not in item for item in texts)
+    nparas = _cell_nparas(data, "AroundX 정글")
+    assert nparas == len(purpose_lines)
+    nparas = _cell_nparas(data, "김포에서 교토")
+    assert nparas is not None and nparas >= 6
+    nparas = _cell_nparas(data, "왕복항공료")
+    assert nparas is not None and nparas >= 10
+    assert any(item.strip() == "이한주" for item in texts)
+    assert any(item.strip() == "전임" for item in texts)
+    assert any(item.strip() == "출장자" for item in texts)
+    assert any(item.strip() == "1인" for item in texts)
+    assert any("AroundX" in item and "주관기관" not in item for item in texts)
+    assert any("주관기관 운영" in item and "AroundX" not in item for item in texts)
+    assert _cell_nparas_exact(data, "이한주") == 2
+    assert _cell_nparas_exact(data, "출장자") == 2
+    nparas = _cell_nparas(data, "주관기관 운영")
+    assert nparas is not None and nparas >= 2
 
 
 def test_stale_plan_without_purpose_lines_still_builds():

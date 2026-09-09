@@ -9,17 +9,19 @@ import re
 import struct
 import zlib
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 from services.cfb_writer import rebuild_ole
 from services.plan_parser import PlanDocument
-from services.travel_calculator import TravelResult
+from services.travel_calculator import TravelResult, truncate_to_ten
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "templates" / "국외출장 심사신청서.hwp"
 HWPTAG_PARA_HEADER = 66
 HWPTAG_PARA_TEXT = 67
 HWPTAG_PARA_CHAR_SHAPE = 68
+HWPTAG_PARA_LINE_SEG = 69
+HWPTAG_CTRL_HEADER = 71
+HWPTAG_LIST_HEADER = 72
 _DOW = "월화수목금토일"
 
 
@@ -80,9 +82,10 @@ def build_hwp_fields(
         "schedule": _schedule_text(start, end, nights, days, plan),
         "event": _event_text(plan),
         "traveler": _traveler_text(traveler_name, title, team, plan),
-        "budget_who": f"{traveler_name} {title}".strip(),
+        "budget_who": _budget_who_text(traveler_name, title),
         "budget": _budget_text(result, plan, grade, nights, days),
         "category": _category_text(plan),
+        "category_who": "출장자 1인",
     }
 
 
@@ -165,9 +168,8 @@ def _default_day_summary(offset: int, span: int, event: str, city: str, from_gim
     return f"{event} {offset}일차"
 
 
-def _cheon(amount: int) -> str:
-    value = int((Decimal(amount) / Decimal(1000)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-    return f"{value:,}천원"
+def _won(amount: int) -> str:
+    return f"{int(amount):,}원"
 
 
 def _budget_text(
@@ -177,54 +179,96 @@ def _budget_text(
     nights: int,
     days: int,
 ) -> str:
-    airfare = result.airfare_krw
-    domestic = int(_plan_get(plan, "domestic_krw", 0) or 0) if plan else 0
+    airfare = truncate_to_ten(result.airfare_krw)
+    domestic = truncate_to_ten(int(_plan_get(plan, "domestic_krw", 0) or 0) if plan else 0)
     transport = airfare + domestic
-    lodging_krw = result.lodging.ceiling_krw
-    daily_krw = result.daily.amount_krw
-    meal_krw = result.meal.amount_krw
+    lodging_krw = truncate_to_ten(result.lodging.ceiling_krw)
+    daily_krw = truncate_to_ten(result.daily.amount_krw)
+    meal_krw = truncate_to_ten(result.meal.amount_krw)
     allow = lodging_krw + daily_krw + meal_krw
-    prep = result.preparation_krw
+    prep = truncate_to_ten(result.preparation_krw)
     total = transport + allow + prep
     rate = result.lodging.rate_usd
     lodging_usd = rate * nights if rate and nights else 0
     grade_label = f"{grade} 지역" if grade else ""
-    head = f"◦ 총 {_cheon(total)}"
+    head = f"◦ 총 {_won(total)}"
     if grade_label and nights and days:
         head += f"({grade_label}, {nights}박 {days}일)"
     lines = [
         head,
-        f"  - 교통비 : {_cheon(transport)}",
-        f"   ·왕복항공료 : {_cheon(airfare)}{_plan_get(plan, 'airfare_note') if plan else ''}",
+        f"  - 교통비 : {_won(transport)}",
+        f"   ·왕복항공료 : {_won(airfare)}{_plan_get(plan, 'airfare_note') if plan else ''}",
     ]
     if domestic:
-        lines.append(f"   ·대중교통운임비(공항) : {_cheon(domestic)}")
-    lines.append(f"  - 출장비 : {_cheon(allow)}")
+        lines.append(f"   ·대중교통운임비(공항) : {_won(domestic)}")
+    lines.append(f"  - 출장비 : {_won(allow)}")
     usd_note = f"(${rate}x{nights}=${lodging_usd})" if rate and nights else ""
-    lines.append(f"   ·숙박비 : {_cheon(lodging_krw)}{usd_note}")
+    lines.append(f"   ·숙박비 : {_won(lodging_krw)}{usd_note}")
     lines.append("    ※실비 정산 예정")
     daily_rate = result.daily.rate_usd
     meal_rate = result.meal.rate_usd
     if daily_rate and days:
-        lines.append(f"   ·일  비 : {_cheon(daily_krw)}(${daily_rate}x{days}=${daily_rate * days})")
+        lines.append(f"   ·일  비 : {_won(daily_krw)}(${daily_rate}x{days}=${daily_rate * days})")
     else:
-        lines.append(f"   ·일  비 : {_cheon(daily_krw)}")
+        lines.append(f"   ·일  비 : {_won(daily_krw)}")
     if meal_rate and days:
-        lines.append(f"   ·식  비 : {_cheon(meal_krw)}(${meal_rate}x{days}=${meal_rate * days})")
+        lines.append(f"   ·식  비 : {_won(meal_krw)}(${meal_rate}x{days}=${meal_rate * days})")
     else:
-        lines.append(f"   ·식  비 : {_cheon(meal_krw)}")
-    lines.append(f"  - 준비금 : {_cheon(prep)}")
+        lines.append(f"   ·식  비 : {_won(meal_krw)}")
+    lines.append(f"  - 준비금 : {_won(prep)}")
     items = _plan_get(plan, "preparation_items", ()) if plan else ()
     if items:
         for label, amount in items:
-            lines.append(f"    ·{label} : {_cheon(amount)}")
+            lines.append(f"    ·{label} : {_won(truncate_to_ten(amount))}")
     return "\n".join(lines)
+
+
+def _budget_who_text(name: str, title: str) -> str:
+    name = (name or "").strip()
+    title = (title or "").strip()
+    if name and title:
+        return f"{name}\n{title}"
+    return _wrap_text(name or title, 4)
 
 
 def _category_text(plan: PlanDocument | None) -> str:
     if not plan or not plan.budget_category:
         return "◦"
-    return "◦" + plan.budget_category.strip().lstrip("◦").strip()
+    return _wrap_text("◦" + plan.budget_category.strip().lstrip("◦").strip(), 40)
+
+
+def _wrap_text(text: str, width: int) -> str:
+    parts = []
+    for raw in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        parts.extend(_wrap_one(raw, width))
+    return "\n".join(parts) if parts else (text or "")
+
+
+def _wrap_one(text: str, width: int) -> list[str]:
+    if width < 1 or len(text) <= width:
+        return [text] if text else [""]
+    out: list[str] = []
+    rest = text
+    seps = (" – ", " - ", "–", "-", " ")
+    min_keep = max(1, width // 3)
+    while len(rest) > width:
+        window = rest[: width + 1]
+        cut = None
+        for sep in seps:
+            pos = window.rfind(sep)
+            if pos >= min_keep:
+                cut = pos
+                break
+        if cut is None:
+            cut = width
+            out.append(rest[:cut])
+            rest = rest[cut:]
+        else:
+            out.append(rest[:cut].rstrip())
+            rest = rest[cut:].lstrip(" –-")
+    if rest:
+        out.append(rest)
+    return out
 
 
 def _fill_template(path: Path, fields: dict[str, str]) -> dict[str, bytes]:
@@ -338,10 +382,159 @@ def _encode_text(text: str) -> bytes:
     out = bytearray()
     for char in text.replace("\r\n", "\n").replace("\r", "\n"):
         if char == "\n":
-            out.extend(struct.pack("<H", 10))
-        else:
-            out.extend(char.encode("utf-16le"))
+            continue
+        out.extend(char.encode("utf-16le"))
     return bytes(out)
+
+
+def _field_lines(value: str) -> list[str]:
+    text = (value or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in text.split("\n")]
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines or [""]
+
+
+def _header_with_nchars(header_rec: tuple, nchars: int, *, last: bool, extra: bool) -> bytes:
+    hdr = bytearray(header_rec[4])
+    flag = 0x80000000 if last else 0
+    struct.pack_into("<I", hdr, 0, flag | nchars)
+    if extra:
+        struct.pack_into("<I", hdr, 4, 0)
+        if len(hdr) >= 12:
+            hdr[10] = 0
+            hdr[11] = 0
+        if len(hdr) >= 24:
+            struct.pack_into("<I", hdr, 20, 0)
+    return _pack_record(header_rec[1], header_rec[2], bytes(hdr))
+
+
+def _shape_payload(nchars: int, original: bytes, *, extra: bool = False) -> bytes:
+    pairs = []
+    for offset in range(0, len(original) - 7, 8):
+        pos, sid = struct.unpack_from("<II", original, offset)
+        pairs.append((pos, sid))
+    if not pairs:
+        return original
+    first_id = pairs[0][1]
+    last_id = first_id if extra else pairs[-1][1]
+    new_pairs = [(0, first_id)]
+    if last_id != first_id and nchars > 1:
+        new_pairs.append((nchars - 1, last_id))
+    return b"".join(struct.pack("<II", pos, sid) for pos, sid in new_pairs)
+
+
+def _line_seg_payload(original: bytes, line_index: int) -> bytes:
+    if len(original) < 8:
+        return original
+    payload = bytearray(original)
+    line_height = struct.unpack_from("<i", original, 8)[0] if len(original) >= 12 else 1000
+    spacing = struct.unpack_from("<i", original, 20)[0] if len(original) >= 24 else 500
+    step = max(line_height, 0) + max(spacing, 0)
+    struct.pack_into("<i", payload, 4, line_index * step)
+    return bytes(payload)
+
+
+def _unpack_packed(blob: bytes) -> tuple[int, int, bytes]:
+    header = struct.unpack_from("<I", blob, 0)[0]
+    tag = header & 0x3FF
+    level = (header >> 10) & 0x3FF
+    size = (header >> 20) & 0xFFF
+    offset = 4
+    if size == 0xFFF:
+        size = struct.unpack_from("<I", blob, 4)[0]
+        offset = 8
+    return tag, level, blob[offset : offset + size]
+
+
+def _set_list_nparas(packed: bytes, nparas: int) -> bytes:
+    tag, level, payload = _unpack_packed(packed)
+    payload = bytearray(payload)
+    struct.pack_into("<I", payload, 0, nparas)
+    return _pack_record(tag, level, bytes(payload))
+
+
+def _take_para_tail(records: list, start: int):
+    shape_rec = line_seg_rec = ctrl_rec = None
+    j = start
+    if j < len(records) and records[j][1] == HWPTAG_PARA_CHAR_SHAPE:
+        shape_rec = records[j]
+        j += 1
+    if j < len(records) and records[j][1] == HWPTAG_PARA_LINE_SEG:
+        line_seg_rec = records[j]
+        j += 1
+    if j < len(records) and records[j][1] == HWPTAG_CTRL_HEADER:
+        ctrl_rec = records[j]
+        j += 1
+    return shape_rec, line_seg_rec, ctrl_rec, j
+
+
+def _emit_paragraphs(
+    rebuilt: list[bytes],
+    header_rec,
+    text_tag: int,
+    text_level: int,
+    prefix: bytes,
+    suffix: bytes,
+    lines: list[str],
+    shape_rec,
+    line_seg_rec,
+    ctrl_rec,
+) -> None:
+    extra_count = max(len(lines) - 1, 0)
+    if extra_count and rebuilt:
+        list_tag, _, list_payload = _unpack_packed(rebuilt[-1])
+        if list_tag == HWPTAG_LIST_HEADER and len(list_payload) >= 4:
+            old_nparas = struct.unpack_from("<I", list_payload, 0)[0]
+            rebuilt[-1] = _set_list_nparas(rebuilt[-1], old_nparas + extra_count)
+    first_payload = prefix + _encode_text(lines[0]) + suffix
+    nchars = len(first_payload) // 2
+    if header_rec and header_rec[1] == HWPTAG_PARA_HEADER:
+        rebuilt.append(_header_with_nchars(header_rec, nchars, last=extra_count == 0, extra=False))
+    rebuilt.append(_pack_record(text_tag, text_level, first_payload))
+    if shape_rec:
+        rebuilt.append(
+            _pack_record(shape_rec[1], shape_rec[2], _shape_payload(nchars, shape_rec[4]))
+        )
+    if line_seg_rec:
+        rebuilt.append(
+            _pack_record(
+                line_seg_rec[1],
+                line_seg_rec[2],
+                _line_seg_payload(line_seg_rec[4], 0),
+            )
+        )
+    if ctrl_rec:
+        rebuilt.append(_pack_record(ctrl_rec[1], ctrl_rec[2], ctrl_rec[4]))
+    for extra_i, extra in enumerate(lines[1:], start=1):
+        extra_payload = _encode_text(extra) + suffix
+        extra_nchars = len(extra_payload) // 2
+        if header_rec and header_rec[1] == HWPTAG_PARA_HEADER:
+            rebuilt.append(
+                _header_with_nchars(
+                    header_rec,
+                    extra_nchars,
+                    last=extra_i == extra_count,
+                    extra=True,
+                )
+            )
+        rebuilt.append(_pack_record(text_tag, text_level, extra_payload))
+        if shape_rec:
+            rebuilt.append(
+                _pack_record(
+                    shape_rec[1],
+                    shape_rec[2],
+                    _shape_payload(extra_nchars, shape_rec[4], extra=True),
+                )
+            )
+        if line_seg_rec:
+            rebuilt.append(
+                _pack_record(
+                    line_seg_rec[1],
+                    line_seg_rec[2],
+                    _line_seg_payload(line_seg_rec[4], extra_i),
+                )
+            )
 
 
 def _replace_content(body: bytes, fields: dict[str, str]) -> bytes:
@@ -368,42 +561,58 @@ def _replace_content(body: bytes, fields: dict[str, str]) -> bytes:
     if empty_ids:
         mapping[empty_ids[0]] = fields["budget_who"]
 
+    header_inserts: dict[int, str] = {}
+    for index, (_header, tag, _level, _extra, _payload) in enumerate(records):
+        if tag != HWPTAG_PARA_HEADER:
+            continue
+        nxt = records[index + 1][1] if index + 1 < len(records) else None
+        if nxt != HWPTAG_PARA_TEXT:
+            header_inserts[index] = _wrap_text(fields.get("category_who", "출장자 1인"), 4)
+
     rebuilt: list[bytes] = []
     i = 0
     while i < len(records):
         _header, tag, level, _extra, payload = records[i]
         orig_index = i
+        if tag == HWPTAG_PARA_HEADER and orig_index in header_inserts:
+            lines = _field_lines(header_inserts[orig_index])
+            shape_rec, line_seg_rec, ctrl_rec, j = _take_para_tail(records, i + 1)
+            _emit_paragraphs(
+                rebuilt,
+                records[i],
+                HWPTAG_PARA_TEXT,
+                3,
+                b"",
+                b"\r\x00",
+                lines,
+                shape_rec,
+                line_seg_rec,
+                ctrl_rec,
+            )
+            i = j
+            continue
         if tag == HWPTAG_PARA_TEXT and orig_index in mapping:
+            lines = _field_lines(mapping[orig_index])
+            header_rec = records[i - 1] if i else None
+            if rebuilt and header_rec and header_rec[1] == HWPTAG_PARA_HEADER:
+                rebuilt.pop()
             prefix, suffix = _split_prefix_suffix(payload)
-            new_payload = prefix + _encode_text(mapping[orig_index]) + suffix
-            nchars = len(new_payload) // 2
-            # previous should be PARA_HEADER
-            if rebuilt:
-                prev = records[i - 1]
-                if prev[1] == HWPTAG_PARA_HEADER:
-                    rebuilt.pop()
-                    hdr = bytearray(prev[4])
-                    flag = struct.unpack_from("<I", hdr, 0)[0] & 0x80000000
-                    struct.pack_into("<I", hdr, 0, flag | nchars)
-                    rebuilt.append(_pack_record(prev[1], prev[2], bytes(hdr)))
-            rebuilt.append(_pack_record(tag, level, new_payload))
-            if i + 1 < len(records) and records[i + 1][1] == HWPTAG_PARA_CHAR_SHAPE:
-                shape_payload = records[i + 1][4]
-                pairs = []
-                for offset in range(0, len(shape_payload) - 7, 8):
-                    pos, sid = struct.unpack_from("<II", shape_payload, offset)
-                    pairs.append((pos, sid))
-                if pairs:
-                    first_id = pairs[0][1]
-                    last_id = pairs[-1][1]
-                    new_pairs = [(0, first_id)]
-                    if last_id != first_id and nchars > 1:
-                        new_pairs.append((nchars - 1, last_id))
-                    packed = b"".join(struct.pack("<II", pos, sid) for pos, sid in new_pairs)
-                    rebuilt.append(_pack_record(records[i + 1][1], records[i + 1][2], packed))
-                    i += 2
-                    continue
-            i += 1
+            if not suffix:
+                suffix = b"\r\x00"
+            shape_rec, line_seg_rec, ctrl_rec, j = _take_para_tail(records, i + 1)
+            _emit_paragraphs(
+                rebuilt,
+                header_rec,
+                tag,
+                level,
+                prefix,
+                suffix,
+                lines,
+                shape_rec,
+                line_seg_rec,
+                ctrl_rec,
+            )
+            i = j
             continue
         rebuilt.append(_pack_record(tag, level, payload))
         i += 1
@@ -423,5 +632,5 @@ def _prv_text(fields: dict[str, str]) -> str:
         f"<4. 방문기관   또는 행사명><{one_line(fields['event'])}>\r\n"
         f"<5. 출 장 자><{one_line(fields['traveler'])}>\r\n"
         f"<6. 소요예산><{one_line(fields['budget_who'])}><{one_line(fields['budget'])}>\r\n"
-        f"<7. 예산과목><출장자 1인><{one_line(fields['category'])}>\r\n"
+        f"<7. 예산과목><{one_line(fields.get('category_who', '출장자 1인'))}><{one_line(fields['category'])}>\r\n"
     )

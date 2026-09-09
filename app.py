@@ -13,13 +13,15 @@ from data.travel_rates import GRADES, PAYMENT_CORPORATE, PAYMENT_PERSONAL, PAYME
 from services.destination_grade_service import list_countries, resolve_destination_grade
 from services.excel_export import build_excel_bytes, excel_filename
 from services.hana_fx import quote_caption
-from services import cfb_writer, hana_fx, hwp_export, plan_parser
+from services import cfb_writer, hana_fx, hwp_export, plan_excel_export, plan_parser
 
 importlib.reload(plan_parser)
 importlib.reload(cfb_writer)
 importlib.reload(hwp_export)
+importlib.reload(plan_excel_export)
 
 from services.hwp_export import build_hwp_bytes, hwp_filename
+from services.plan_excel_export import build_plan_excel_bytes, plan_excel_filename
 from services.plan_parser import PlanDocument, parse_plan_pdf, parse_plan_text
 from services.travel_calculator import (
     StayInput,
@@ -189,7 +191,7 @@ def _on_plan_traveler_change() -> None:
 def _render_plan_loader() -> None:
     with st.container(border=True):
         st.subheader("0. 계획안")
-        st.caption("계획안 PDF를 첨부하면 출장자·일정·출장지·항공료·준비금을 채웁니다. 여비 계산 후 Excel과 국외출장 심사신청서(HWP)를 함께 받습니다.")
+        st.caption("계획안 PDF를 첨부하면 출장자·일정·출장지·항공료·준비금을 채웁니다. 여비 계산 후 Excel, 국외출장 심사신청서(HWP), 해외출장 계획 엑셀을 함께 받습니다.")
         uploaded = st.file_uploader("계획안 PDF 첨부", type=["pdf"])
         load_clicked = st.button(
             "계획안 불러오기",
@@ -241,7 +243,7 @@ def _render_plan_loader() -> None:
                 options=labels,
                 key="plan_traveler_pick",
                 on_change=_on_plan_traveler_change,
-                help="출장자마다 여비를 따로 계산하고, Excel·심사신청서도 따로 받습니다.",
+                help="출장자마다 여비를 따로 계산하고, Excel·심사신청서·해외출장 계획 엑셀도 따로 받습니다.",
             )
 
 
@@ -767,6 +769,22 @@ def main() -> None:
             hwp_bytes = None
             hwp_error = str(exc)
         hwp_name = hwp_filename(packed["name"], title, approval_date)
+        plan_excel_error = ""
+        try:
+            plan_excel_bytes = build_plan_excel_bytes(
+                result,
+                packed["name"],
+                title=title,
+                team=team,
+                plan=plan,
+                departure=departure,
+                return_on=return_on,
+                approval_date=approval_date,
+            )
+        except Exception as exc:
+            plan_excel_bytes = None
+            plan_excel_error = str(exc)
+        plan_excel_name = plan_excel_filename(packed["name"], approval_date)
         down_col1, down_col2 = st.columns(2)
         with down_col1:
             if excel_bytes:
@@ -793,6 +811,19 @@ def main() -> None:
                 st.error(f"심사신청서를 만들지 못했습니다. {hwp_error}")
             else:
                 st.info("심사신청서 파일을 만들 수 없습니다. 여비 계산을 다시 실행해 주세요.")
+        if plan_excel_bytes:
+            st.download_button(
+                "해외출장 계획 엑셀 다운로드",
+                data=plan_excel_bytes,
+                file_name=plan_excel_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="plan_excel_download",
+            )
+        elif plan_excel_error:
+            st.error(f"해외출장 계획 엑셀을 만들지 못했습니다. {plan_excel_error}")
+        else:
+            st.info("해외출장 계획 엑셀을 만들 수 없습니다. 여비 계산을 다시 실행해 주세요.")
 
 
 main()

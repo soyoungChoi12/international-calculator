@@ -195,6 +195,7 @@ def test_example_trip_shows_expected_totals():
     assert "**70,000원**" in markdown
     assert any(button.label == "Excel 다운로드" for button in at.download_button)
     assert any(button.label == "심사신청서(HWP) 다운로드" for button in at.download_button)
+    assert any(button.label == "해외출장 계획 엑셀 다운로드" for button in at.download_button)
 
 
 def test_plan_upload_section_is_visible():
@@ -252,3 +253,4 @@ def test_calculate_with_stale_plan_session_does_not_crash():
     assert not at.error
     assert any(button.label == "Excel 다운로드" for button in at.download_button)
     assert any(button.label == "심사신청서(HWP) 다운로드" for button in at.download_button)
+    assert any(button.label == "해외출장 계획 엑셀 다운로드" for button in at.download_button)
