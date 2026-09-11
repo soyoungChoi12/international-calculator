@@ -9,8 +9,8 @@ from openpyxl import load_workbook
 
 from config.excel_mapping import OUTPUT_SHEET_NAME, TEMPLATE_PATH
 from data.travel_rates import PAYMENT_CORPORATE, PAYMENT_PERSONAL
-from services.excel_export import build_excel_bytes, excel_filename
-from services.travel_calculator import StayInput, TravelInput, calculate_travel
+from services.excel_export import build_excel_bytes, build_party_excel_bytes, excel_filename, excel_filename_for_party
+from services.travel_calculator import PartyMember, PartyResult, StayInput, TravelInput, calculate_travel
 from tests.test_travel_calculator import _sample
 
 
@@ -220,3 +220,23 @@ def test_zero_airfare_lodging_prep_write_dash_in_d_column():
     assert ws["C10"].value == 0
     assert ws["D10"].value == "-"
     wb.close()
+
+
+def test_party_excel_writes_one_sheet_per_person():
+    staff = calculate_travel(_sample())
+    head = calculate_travel(_sample(role="본부장"))
+    party = [
+        PartyResult(member=PartyMember(name="이한주", role="팀장 및 팀원"), result=staff),
+        PartyResult(member=PartyMember(name="이종휘", role="본부장"), result=head),
+    ]
+    data = build_party_excel_bytes(party, date(2026, 8, 31))
+    wb = load_workbook(BytesIO(data))
+    assert "이한주" in wb.sheetnames
+    assert "이종휘" in wb.sheetnames
+    assert OUTPUT_SHEET_NAME not in wb.sheetnames
+    assert wb["이한주"]["B2"].value == "그외직원(팀장및팀원)"
+    assert wb["이종휘"]["B2"].value == "본부장"
+    assert wb["이한주"]["C7"].value == 182_000
+    assert wb["이종휘"]["C7"].value == 210_000
+    wb.close()
+    assert excel_filename_for_party(party, date(2026, 8, 31)) == "국외여비지급내역서_이한주외1_20260831.xlsx"

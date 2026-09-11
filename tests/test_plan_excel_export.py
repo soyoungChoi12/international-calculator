@@ -10,10 +10,11 @@ from openpyxl import load_workbook
 from services.plan_excel_export import (
     TEMPLATE_PATH,
     build_plan_excel_bytes,
+    build_party_plan_excel_bytes,
     plan_excel_filename,
 )
 from services.plan_parser import PlanDocument, parse_plan_text
-from services.travel_calculator import StayInput, TravelInput, calculate_travel
+from services.travel_calculator import PartyMember, PartyResult, StayInput, TravelInput, calculate_travel
 from tests.test_plan_parser import SAMPLE_PLAN
 
 
@@ -124,4 +125,48 @@ def test_missing_costs_are_zero():
     assert ws["K6"].value == 0
     assert ws["O6"].value == 0
     assert ws["L6"].value == result.lodging.ceiling_krw
+    wb.close()
+
+
+def test_party_plan_excel_writes_one_sheet_per_person():
+    staff = calculate_travel(_kyoto_input())
+    head = calculate_travel(
+        TravelInput(
+            role="본부장",
+            grade="나",
+            departure_date=date(2026, 6, 30),
+            return_date=date(2026, 7, 3),
+            lodging_nights=3,
+            exchange_rate=1535,
+            airfare_krw=520_300,
+            lodging_actual_krw=0,
+            preparation_krw=150_000,
+            stays=[StayInput("일본", "교토", 3, "나", stay_days=4)],
+        )
+    )
+    party = [
+        PartyResult(
+            member=PartyMember(name="이한주", role="팀장 및 팀원", title="전임", team="글로벌전략협업팀"),
+            result=staff,
+        ),
+        PartyResult(
+            member=PartyMember(name="이종휘", role="본부장", title="본부장", team="글로벌전략협업팀"),
+            result=head,
+        ),
+    ]
+    data = build_party_plan_excel_bytes(
+        party,
+        departure=date(2026, 6, 30),
+        return_on=date(2026, 7, 3),
+        approval_date=date(2026, 6, 22),
+    )
+    wb = load_workbook(BytesIO(data))
+    assert "이한주" in wb.sheetnames
+    assert "이종휘" in wb.sheetnames
+    assert wb["이한주"]["D6"].value == "이한주"
+    assert wb["이한주"]["B6"].value == "전임"
+    assert wb["이종휘"]["D6"].value == "이종휘"
+    assert wb["이종휘"]["B6"].value == "본부장"
+    assert wb["이한주"]["M6"].value == staff.daily.amount_krw
+    assert wb["이종휘"]["M6"].value == head.daily.amount_krw
     wb.close()

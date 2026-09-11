@@ -28,6 +28,7 @@ from config.excel_mapping import (
     FX_SOURCE_URL,
     GRADE_CALC_COLUMNS,
     GRADE_CALC_ROWS,
+    LOOKUP_SHEET_NAME,
     OUTPUT_SHEET_NAME,
     RATE_PLAIN_ROWS,
     TEMPLATE_PATH,
@@ -37,17 +38,26 @@ from config.excel_mapping import (
     lodging_check_cell,
 )
 from services.travel_calculator import (
+    PartyMember,
+    PartyResult,
     RateSlice,
     TravelResult,
     execution_krw,
     lodging_actual_by_grade,
+    party_filename_label,
     truncate_to_ten,
 )
 
 
-def excel_filename(traveler_name: str, when: date) -> str:
+def excel_filename(traveler_name: str, when: date, extra_count: int = 0) -> str:
     safe = re.sub(r'[\\/:*?"<>|]', "", traveler_name.strip()) or "미기재"
+    if extra_count:
+        safe = f"{safe}외{extra_count}"
     return f"국외여비지급내역서_{safe}_{when.strftime('%Y%m%d')}.xlsx"
+
+
+def excel_filename_for_party(party: list[PartyResult], when: date) -> str:
+    return excel_filename(party_filename_label([item.member.name for item in party]), when)
 
 
 def _payment_or_dash(amount_krw: int, payment_method: str) -> str:
@@ -56,6 +66,15 @@ def _payment_or_dash(amount_krw: int, payment_method: str) -> str:
 
 
 def build_excel_bytes(result: TravelResult, traveler_name: str, approval_date: date) -> bytes:
+    return build_party_excel_bytes(
+        [PartyResult(member=PartyMember(name=traveler_name, role=result.role), result=result)],
+        approval_date,
+    )
+
+
+def build_party_excel_bytes(party: list[PartyResult], approval_date: date) -> bytes:
+    if not party:
+        raise ValueError("출장자 계산 결과가 없습니다.")
     if not TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"Excel 템플릿을 찾을 수 없습니다: {TEMPLATE_PATH}")
 
@@ -63,17 +82,62 @@ def build_excel_bytes(result: TravelResult, traveler_name: str, approval_date: d
         work_path = Path(tmp) / TEMPLATE_PATH.name
         shutil.copy2(TEMPLATE_PATH, work_path)
         wb = load_workbook(work_path)
-        _fill_workbook(wb, result, approval_date)
+        _fill_party_workbook(wb, party, approval_date)
         buffer = BytesIO()
         wb.save(buffer)
         wb.close()
         return buffer.getvalue()
 
 
-def _fill_workbook(wb, result: TravelResult, approval_date: date) -> None:
+def _source_sheet(wb):
     if TEMPLATE_SHEET_NAME in wb.sheetnames:
-        wb[TEMPLATE_SHEET_NAME].title = OUTPUT_SHEET_NAME
-    ws = wb[OUTPUT_SHEET_NAME] if OUTPUT_SHEET_NAME in wb.sheetnames else wb[wb.sheetnames[0]]
+        return wb[TEMPLATE_SHEET_NAME]
+    if OUTPUT_SHEET_NAME in wb.sheetnames:
+        return wb[OUTPUT_SHEET_NAME]
+    for name in wb.sheetnames:
+        if name != LOOKUP_SHEET_NAME:
+            return wb[name]
+    return wb[wb.sheetnames[0]]
+
+
+def _safe_sheet_title(name: str, used: set[str]) -> str:
+    safe = re.sub(r'[:\\/?*\[\]]', "", (name or "").strip()) or "출장자"
+    safe = safe[:31]
+    candidate = safe
+    index = 2
+    while candidate in used:
+        suffix = f"_{index}"
+        candidate = f"{safe[: 31 - len(suffix)]}{suffix}"
+        index += 1
+    used.add(candidate)
+    return candidate
+
+
+def _fill_party_workbook(wb, party: list[PartyResult], approval_date: date) -> None:
+    source = _source_sheet(wb)
+    used = set(wb.sheetnames)
+    sheets = [source]
+    for _item in party[1:]:
+        copied = wb.copy_worksheet(source)
+        sheets.append(copied)
+        used.add(copied.title)
+    if len(party) == 1:
+        titles = [OUTPUT_SHEET_NAME]
+        used.discard(source.title)
+        used.add(OUTPUT_SHEET_NAME)
+    else:
+        titles = []
+        used.discard(source.title)
+        for copied in sheets[1:]:
+            used.discard(copied.title)
+        for item in party:
+            titles.append(_safe_sheet_title(item.member.name, used))
+    for ws, title, item in zip(sheets, titles, party):
+        ws.title = title
+        _fill_sheet(ws, item.result, approval_date)
+
+
+def _fill_sheet(ws: Worksheet, result: TravelResult, approval_date: date) -> None:
 
     for address in BLANK_CELLS:
         ws[address] = None

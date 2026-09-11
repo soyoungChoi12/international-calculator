@@ -13,7 +13,7 @@ from pathlib import Path
 
 from services.cfb_writer import rebuild_ole
 from services.plan_parser import PlanDocument
-from services.travel_calculator import TravelResult, truncate_to_ten
+from services.travel_calculator import PartyResult, TravelResult, truncate_to_ten
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "templates" / "국외출장 심사신청서.hwp"
 HWPTAG_PARA_HEADER = 66
@@ -25,11 +25,23 @@ HWPTAG_LIST_HEADER = 72
 _DOW = "월화수목금토일"
 
 
-def hwp_filename(traveler_name: str, title: str, when: date) -> str:
+def hwp_filename(traveler_name: str, title: str, when: date, extra_count: int = 0) -> str:
     safe_name = re.sub(r'[\\/:*?"<>|]', "", (traveler_name or "").strip()) or "미기재"
-    safe_title = re.sub(r'[\\/:*?"<>|]', "", (title or "").strip())
-    extra = f" {safe_title}" if safe_title else ""
+    if extra_count:
+        safe_name = f"{safe_name}외{extra_count}"
+        extra = ""
+    else:
+        safe_title = re.sub(r'[\\/:*?"<>|]', "", (title or "").strip())
+        extra = f" {safe_title}" if safe_title else ""
     return f"({when.strftime('%y%m%d')}) 국외출장 심사신청서 ({safe_name}{extra}).hwp"
+
+
+def hwp_filename_for_party(party: list[PartyResult], when: date) -> str:
+    names = [item.member.name for item in party]
+    first = names[0] if names else ""
+    title = party[0].member.title if party else ""
+    extra = max(len(names) - 1, 0)
+    return hwp_filename(first, title, when, extra_count=extra)
 
 
 def build_hwp_bytes(
@@ -42,6 +54,7 @@ def build_hwp_bytes(
     departure: date | None = None,
     return_on: date | None = None,
     approval_date: date | None = None,
+    party: list[PartyResult] | None = None,
 ) -> bytes:
     if not TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"HWP 템플릿을 찾을 수 없습니다: {TEMPLATE_PATH}")
@@ -53,6 +66,7 @@ def build_hwp_bytes(
         plan=plan,
         departure=departure,
         return_on=return_on,
+        party=party,
     )
     return rebuild_ole(TEMPLATE_PATH, _fill_template(TEMPLATE_PATH, fields))
 
@@ -66,26 +80,30 @@ def build_hwp_fields(
     plan: PlanDocument | None = None,
     departure: date | None = None,
     return_on: date | None = None,
+    party: list[PartyResult] | None = None,
 ) -> dict[str, str]:
-    stay = result.stays[0] if result.stays else None
+    primary = party[0].result if party else result
+    stay = primary.stays[0] if primary.stays else None
     country = stay.country if stay else (plan.country if plan else "")
     city = stay.city if stay else (plan.city if plan else "")
-    grade = (stay.grade if stay else "") or (plan.grade if plan else "") or (result.grade.split("/")[0] if result.grade else "")
+    grade = (stay.grade if stay else "") or (plan.grade if plan else "") or (primary.grade.split("/")[0] if primary.grade else "")
     place = " ".join(part for part in (country, city) if part)
-    nights = result.lodging_nights
-    days = result.trip_days
+    nights = primary.lodging_nights
+    days = primary.trip_days
     start = departure or (plan.departure if plan else None)
     end = return_on or (plan.return_on if plan else None)
+    results = [item.result for item in party] if party else [result]
+    count = len(results)
     return {
         "purpose": _purpose_text(plan),
         "region": f"◦ {place}(출장지역 ‘{grade}’ 지역)" if place else "◦",
         "schedule": _schedule_text(start, end, nights, days, plan),
         "event": _event_text(plan),
-        "traveler": _traveler_text(traveler_name, title, team, plan),
-        "budget_who": _budget_who_text(traveler_name, title),
-        "budget": _budget_text(result, plan, grade, nights, days),
+        "traveler": _traveler_text(traveler_name, title, team, plan, party=party),
+        "budget_who": "" if count > 1 else _budget_who_text(traveler_name, title),
+        "budget": _budget_text(results, plan, grade, nights, days),
         "category": _category_text(plan),
-        "category_who": "출장자 1인",
+        "category_who": f"출장자 {count}인",
     }
 
 
@@ -115,12 +133,27 @@ def _event_text(plan: PlanDocument | None) -> str:
     return f"◦ {plan.event_name.strip()}"
 
 
-def _traveler_text(name: str, title: str, team: str, plan: PlanDocument | None) -> str:
+def _traveler_text(
+    name: str,
+    title: str,
+    team: str,
+    plan: PlanDocument | None,
+    party: list[PartyResult] | None = None,
+) -> str:
+    hq = (_plan_get(plan, "headquarters") if plan else "") or ""
+    if party and len(party) > 1:
+        use_team = team or party[0].member.team or ""
+        people = ", ".join(
+            f"{item.member.name} {item.member.title}".strip() if item.member.title else item.member.name
+            for item in party
+            if item.member.name
+        )
+        parts = [part for part in (hq, use_team, people) if part]
+        return "◦ " + " ".join(parts) if parts else "◦"
     person = plan.travelers[0] if plan and plan.travelers else None
     use_name = name or (person.name if person else "")
     use_title = title or (person.title if person else "")
     use_team = team or (person.team if person else "")
-    hq = (_plan_get(plan, "headquarters") if plan else "") or ""
     parts = [part for part in (hq, use_team, use_name, use_title) if part]
     return "◦ " + " ".join(parts) if parts else "◦"
 
@@ -173,27 +206,39 @@ def _won(amount: int) -> str:
 
 
 def _budget_text(
-    result: TravelResult,
+    results: TravelResult | list[TravelResult],
     plan: PlanDocument | None,
     grade: str,
     nights: int,
     days: int,
 ) -> str:
-    airfare = truncate_to_ten(result.airfare_krw)
-    domestic = truncate_to_ten(int(_plan_get(plan, "domestic_krw", 0) or 0) if plan else 0)
+    items = results if isinstance(results, list) else [results]
+    count = max(len(items), 1)
+    first = items[0]
+    airfare = sum(truncate_to_ten(item.airfare_krw) for item in items)
+    domestic_one = truncate_to_ten(int(_plan_get(plan, "domestic_krw", 0) or 0) if plan else 0)
+    domestic = domestic_one * count
     transport = airfare + domestic
-    lodging_krw = truncate_to_ten(result.lodging.ceiling_krw)
-    daily_krw = truncate_to_ten(result.daily.amount_krw)
-    meal_krw = truncate_to_ten(result.meal.amount_krw)
+    lodging_krw = sum(truncate_to_ten(item.lodging.ceiling_krw) for item in items)
+    daily_krw = sum(truncate_to_ten(item.daily.amount_krw) for item in items)
+    meal_krw = sum(truncate_to_ten(item.meal.amount_krw) for item in items)
     allow = lodging_krw + daily_krw + meal_krw
-    prep = truncate_to_ten(result.preparation_krw)
+    prep = sum(truncate_to_ten(item.preparation_krw) for item in items)
     total = transport + allow + prep
-    rate = result.lodging.rate_usd
-    lodging_usd = rate * nights if rate and nights else 0
+    lodging_rates = {item.lodging.rate_usd for item in items}
+    daily_rates = {item.daily.rate_usd for item in items}
+    meal_rates = {item.meal.rate_usd for item in items}
+    rate = first.lodging.rate_usd if len(lodging_rates) == 1 else 0
+    lodging_usd = sum(
+        (item.lodging.rate_usd * nights) if item.lodging.rate_usd and nights else 0 for item in items
+    )
+    daily_usd = sum(item.daily.amount_usd for item in items)
+    meal_usd = sum(item.meal.amount_usd for item in items)
     grade_label = f"{grade} 지역" if grade else ""
     head = f"◦ 총 {_won(total)}"
-    if grade_label and nights and days:
-        head += f"({grade_label}, {nights}박 {days}일)"
+    extras = [part for part in (grade_label, f"{nights}박 {days}일" if nights and days else "", f"{count}인" if count > 1 else "") if part]
+    if extras:
+        head += f"({', '.join(extras)})"
     lines = [
         head,
         f"  - 교통비 : {_won(transport)}",
@@ -202,28 +247,36 @@ def _budget_text(
     if domestic:
         lines.append(f"   ·대중교통운임비(공항) : {_won(domestic)}")
     lines.append(f"  - 출장비 : {_won(allow)}")
-    usd_note = f"(${rate}x{nights}=${lodging_usd})" if rate and nights else ""
+    usd_note = ""
+    if rate and nights:
+        per = rate * nights
+        usd_note = f"(${rate}x{nights}=${per})" if count == 1 else f"(${rate}x{nights}=${per} × {count}인)"
     lines.append(f"   ·숙박비 : {_won(lodging_krw)}{usd_note}")
     lines.append("    ※실비 정산 예정")
-    daily_rate = result.daily.rate_usd
-    meal_rate = result.meal.rate_usd
+    daily_rate = first.daily.rate_usd if len(daily_rates) == 1 else 0
+    meal_rate = first.meal.rate_usd if len(meal_rates) == 1 else 0
+    breakfast_nights = sum(item.breakfast_nights for item in items)
     if daily_rate and days:
-        lines.append(f"   ·일  비 : {_won(daily_krw)}(${daily_rate}x{days}=${daily_rate * days})")
+        per_daily = daily_rate * days
+        daily_note = f"(${daily_rate}x{days}=${per_daily})" if count == 1 else f"(${daily_rate}x{days}=${per_daily} × {count}인)"
+        lines.append(f"   ·일  비 : {_won(daily_krw)}{daily_note}")
     else:
         lines.append(f"   ·일  비 : {_won(daily_krw)}")
-    if result.breakfast_nights:
+    if breakfast_nights:
         lines.append(
-            f"   ·식  비 : {_won(meal_krw)}(${result.meal.amount_usd}, 조식 {result.breakfast_nights}일 1/3 공제)"
+            f"   ·식  비 : {_won(meal_krw)}(${meal_usd}, 조식 {breakfast_nights}일 1/3 공제)"
         )
     elif meal_rate and days:
-        lines.append(f"   ·식  비 : {_won(meal_krw)}(${meal_rate}x{days}=${meal_rate * days})")
+        per_meal = meal_rate * days
+        meal_note = f"(${meal_rate}x{days}=${per_meal})" if count == 1 else f"(${meal_rate}x{days}=${per_meal} × {count}인)"
+        lines.append(f"   ·식  비 : {_won(meal_krw)}{meal_note}")
     else:
         lines.append(f"   ·식  비 : {_won(meal_krw)}")
     lines.append(f"  - 준비금 : {_won(prep)}")
-    items = _plan_get(plan, "preparation_items", ()) if plan else ()
-    if items:
-        for label, amount in items:
-            lines.append(f"    ·{label} : {_won(truncate_to_ten(amount))}")
+    prep_items = _plan_get(plan, "preparation_items", ()) if plan else ()
+    if prep_items:
+        for label, amount in prep_items:
+            lines.append(f"    ·{label} : {_won(truncate_to_ten(amount) * count)}")
     return "\n".join(lines)
 
 

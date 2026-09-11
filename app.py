@@ -23,14 +23,22 @@ importlib.reload(cfb_writer)
 importlib.reload(hwp_export)
 importlib.reload(plan_excel_export)
 
-from services.excel_export import build_excel_bytes, excel_filename
-from services.hwp_export import build_hwp_bytes, hwp_filename
-from services.plan_excel_export import build_plan_excel_bytes, plan_excel_filename
+from services.excel_export import (
+    build_party_excel_bytes,
+    excel_filename_for_party,
+)
+from services.hwp_export import build_hwp_bytes, hwp_filename_for_party
+from services.plan_excel_export import (
+    build_party_plan_excel_bytes,
+    plan_excel_filename_for_party,
+)
 from services.plan_parser import PlanDocument, parse_plan_pdf, parse_plan_text
 from services.travel_calculator import (
+    PartyMember,
+    PartyResult,
     StayInput,
     TravelInput,
-    calculate_travel,
+    calculate_for_members,
     calculate_trip_days,
     validate_travel_input,
 )
@@ -127,6 +135,9 @@ def _init_stay_ids() -> None:
         st.session_state.next_rental_id = 0
     if "calc_results" not in st.session_state:
         st.session_state.calc_results = {}
+    if "traveler_ids" not in st.session_state:
+        st.session_state.traveler_ids = [0]
+        st.session_state.next_traveler_id = 1
 
 
 def _plan_traveler_label(traveler) -> str:
@@ -146,17 +157,39 @@ def _refresh_plan_document(plan: PlanDocument | None) -> PlanDocument | None:
     return plan
 
 
+def _fill_traveler_rows(travelers) -> None:
+    if not travelers:
+        return
+    first_id = (st.session_state.traveler_ids or [0])[0]
+    ids = [first_id]
+    first = travelers[0]
+    st.session_state.traveler_name = first.name
+    st.session_state.traveler_role = first.role
+    st.session_state.plan_traveler_pick = _plan_traveler_label(first)
+    st.session_state.plan_traveler_title = first.title
+    st.session_state.plan_traveler_team = first.team
+    st.session_state[f"traveler_title_{first_id}"] = first.title
+    st.session_state[f"traveler_team_{first_id}"] = first.team
+    for person in travelers[1:]:
+        tid = st.session_state.next_traveler_id
+        st.session_state.next_traveler_id += 1
+        ids.append(tid)
+        st.session_state[f"traveler_name_{tid}"] = person.name
+        st.session_state[f"traveler_role_{tid}"] = person.role
+        st.session_state[f"traveler_title_{tid}"] = person.title
+        st.session_state[f"traveler_team_{tid}"] = person.team or first.team
+    st.session_state.traveler_ids = ids
+    st.session_state.plan_travelers_applied_for = tuple(
+        (item.name, item.role, item.title) for item in travelers
+    )
+
+
 def _apply_plan_to_form(plan: PlanDocument, traveler_index: int = 0) -> None:
     _init_stay_ids()
     travelers = plan.travelers
     if travelers:
         traveler_index = max(0, min(traveler_index, len(travelers) - 1))
-        person = travelers[traveler_index]
-        st.session_state.traveler_name = person.name
-        st.session_state.traveler_role = person.role
-        st.session_state.plan_traveler_pick = _plan_traveler_label(person)
-        st.session_state.plan_traveler_title = person.title
-        st.session_state.plan_traveler_team = person.team
+        _fill_traveler_rows(travelers)
     st.session_state.plan_document = plan
     st.session_state.plan_traveler_index = traveler_index
     if plan.departure:
@@ -181,21 +214,10 @@ def _apply_plan_to_form(plan: PlanDocument, traveler_index: int = 0) -> None:
         st.session_state[f"stay_days_{stay_id}_{departure}_{return_on}"] = trip_days
 
 
-def _on_plan_traveler_change() -> None:
-    plan = st.session_state.get("plan_document")
-    if not plan or not plan.travelers:
-        return
-    labels = [_plan_traveler_label(item) for item in plan.travelers]
-    picked = st.session_state.get("plan_traveler_pick")
-    if picked not in labels:
-        return
-    _apply_plan_to_form(plan, labels.index(picked))
-
-
 def _render_plan_loader() -> None:
     with st.container(border=True):
         st.subheader("0. 계획안")
-        st.caption("계획안 PDF를 첨부하면 출장자·일정·출장지·항공료·준비금을 채웁니다. 여비 계산 후 Excel, 국외출장 심사신청서(HWP), 해외출장 계획 엑셀을 함께 받습니다.")
+        st.caption("계획안 PDF를 첨부하면 출장자·일정·출장지·항공료·준비금을 채웁니다. 출장자가 여러 명이면 한 번에 계산하고, Excel·해외출장 계획 엑셀은 인원별 시트로, 심사신청서는 합산 예산으로 받습니다.")
         uploaded = st.file_uploader("계획안 PDF 첨부", type=["pdf"])
         load_clicked = st.button(
             "계획안 불러오기",
@@ -215,6 +237,11 @@ def _render_plan_loader() -> None:
         plan = _refresh_plan_document(st.session_state.get("plan_document"))
         if plan is not None:
             st.session_state.plan_document = plan
+            travelers = getattr(plan, "travelers", ()) or ()
+            token = tuple((item.name, item.role, item.title) for item in travelers)
+            if travelers and st.session_state.get("plan_travelers_applied_for") != token:
+                _init_stay_ids()
+                _fill_traveler_rows(travelers)
         if not plan:
             return
         lines = []
@@ -240,15 +267,109 @@ def _render_plan_loader() -> None:
             st.success(plan.grade_message)
         for warn in plan.warnings:
             st.warning(warn)
-        if len(plan.travelers) > 1:
-            labels = [_plan_traveler_label(item) for item in plan.travelers]
-            st.radio(
-                "계산할 출장자",
-                options=labels,
-                key="plan_traveler_pick",
-                on_change=_on_plan_traveler_change,
-                help="출장자마다 여비를 따로 계산하고, Excel·심사신청서·해외출장 계획 엑셀도 따로 받습니다.",
+
+
+def _add_traveler() -> None:
+    new_id = st.session_state.next_traveler_id
+    st.session_state.next_traveler_id += 1
+    prev_id = st.session_state.traveler_ids[-1]
+    prev_role = (
+        st.session_state.get("traveler_role")
+        if prev_id == st.session_state.traveler_ids[0]
+        else st.session_state.get(f"traveler_role_{prev_id}")
+    )
+    if prev_role:
+        st.session_state[f"traveler_role_{new_id}"] = prev_role
+    prev_team = st.session_state.get(f"traveler_team_{prev_id}") or st.session_state.get("plan_traveler_team")
+    if prev_team:
+        st.session_state[f"traveler_team_{new_id}"] = prev_team
+    st.session_state.traveler_ids.append(new_id)
+
+
+def _remove_traveler(traveler_id: int) -> None:
+    ids = list(st.session_state.traveler_ids)
+    if len(ids) <= 1 or traveler_id == ids[0]:
+        return
+    st.session_state.traveler_ids = [item for item in ids if item != traveler_id]
+
+
+def _render_traveler(traveler_id: int, index: int, total: int, first_id: int) -> PartyMember:
+    if total > 1:
+        title_col, del_col = st.columns([5, 1])
+        with title_col:
+            st.markdown(f"**출장자 {index}**")
+        with del_col:
+            if traveler_id != first_id:
+                st.button(
+                    "삭제",
+                    key=f"traveler_del_{traveler_id}",
+                    on_click=_remove_traveler,
+                    args=(traveler_id,),
+                    use_container_width=True,
+                )
+    name_label = "출장자명" if total == 1 else f"출장자명 {index}"
+    role_label = "출장자 구분" if total == 1 else f"출장자 구분 {index}"
+    name_key = "traveler_name" if traveler_id == first_id else f"traveler_name_{traveler_id}"
+    role_key = "traveler_role" if traveler_id == first_id else f"traveler_role_{traveler_id}"
+    title_key = "plan_traveler_title" if traveler_id == first_id else f"traveler_title_{traveler_id}"
+    name = st.text_input(
+        name_label,
+        placeholder="예: 홍길동",
+        key=name_key,
+        help="Excel 본문에는 넣지 않고, 다운로드 파일명과 심사신청서 출장자에 사용합니다.",
+    )
+    role_kwargs = {"options": list(ROLES), "key": role_key}
+    if role_key not in st.session_state:
+        role_kwargs["index"] = 2
+    role = st.selectbox(role_label, **role_kwargs)
+    title = ""
+    if total > 1:
+        title = st.text_input("직함", placeholder="예: 전임", key=title_key)
+    else:
+        title = (st.session_state.get(title_key) or "").strip()
+    team = (
+        st.session_state.get(f"traveler_team_{traveler_id}")
+        or st.session_state.get("plan_traveler_team")
+        or ""
+    )
+    return PartyMember(
+        name=(name or "").strip(),
+        role=role,
+        title=(title or "").strip(),
+        team=(team or "").strip(),
+    )
+
+
+def _party_members_from_plan(plan: PlanDocument | None, name: str, role: str) -> list[PartyMember]:
+    travelers = getattr(plan, "travelers", ()) if plan else ()
+    if travelers and len(travelers) > 1:
+        return [
+            PartyMember(name=item.name, role=item.role, title=item.title, team=item.team)
+            for item in travelers
+        ]
+    return [
+        PartyMember(
+            name=(name or "").strip(),
+            role=role,
+            title=(st.session_state.get("plan_traveler_title") or "").strip(),
+            team=(st.session_state.get("plan_traveler_team") or "").strip(),
+        )
+    ]
+
+
+def _to_party_results(packed_party: list[dict]) -> list[PartyResult]:
+    results = []
+    for item in packed_party:
+        member = item.get("member")
+        if not isinstance(member, PartyMember):
+            member = PartyMember(
+                name=item.get("name") or "",
+                role=item["result"].role,
+                title=item.get("title") or "",
+                team=item.get("team") or "",
             )
+        results.append(PartyResult(member=member, result=item["result"]))
+    return results
 
 
 def _add_stay() -> None:
@@ -481,8 +602,21 @@ def main() -> None:
 
     with st.container(border=True):
         st.subheader("1. 출장 기본정보")
-        name = st.text_input("출장자명", placeholder="예: 홍길동", key="traveler_name", help="Excel 본문에는 넣지 않고, 다운로드 파일명에 사용합니다.")
-        role = st.selectbox("출장자 구분", options=list(ROLES), index=2, key="traveler_role")
+        traveler_ids = list(st.session_state.traveler_ids)
+        first_traveler_id = traveler_ids[0]
+        rendered_travelers: list[PartyMember] = []
+        for index, traveler_id in enumerate(traveler_ids, start=1):
+            rendered_travelers.append(
+                _render_traveler(traveler_id, index, len(traveler_ids), first_traveler_id)
+            )
+        st.button("출장자 추가", on_click=_add_traveler, use_container_width=True)
+        if len(rendered_travelers) > 1:
+            st.caption(
+                "항공료·준비금·숙박실비는 1인 기준입니다. 여비 계산 시 인원별 직급 기준액을 적용하고, "
+                "심사신청서 소요예산은 인원 합산입니다."
+            )
+        name = rendered_travelers[0].name
+        role = rendered_travelers[0].role
 
         date_col1, date_col2, date_col3 = st.columns(3)
         today = date.today()
@@ -644,14 +778,18 @@ def main() -> None:
         if any(stay.grade == "" for stay in stays) or not stays:
             st.error("지역등급을 확인할 수 없습니다. 출장지를 입력하거나 가/나/다/라를 직접 선택해 주세요.")
             st.session_state.pop("calc_result", None)
+            st.session_state.pop("calc_party", None)
             return
         if _or_default(exchange_rate, 0) <= 0:
             st.error("적용환율을 입력해 주세요.")
             st.session_state.pop("calc_result", None)
+            st.session_state.pop("calc_party", None)
             return
 
+        plan = _refresh_plan_document(st.session_state.get("plan_document"))
+        members = rendered_travelers or _party_members_from_plan(plan, name, role)
         inp = TravelInput(
-            role=role,
+            role=members[0].role,
             grade=stays[0].grade,
             departure_date=departure,
             return_date=return_on,
@@ -672,30 +810,41 @@ def main() -> None:
             for err in validation.errors:
                 st.error(err)
             st.session_state.pop("calc_result", None)
+            st.session_state.pop("calc_party", None)
             return
 
-        result = calculate_travel(inp)
-        approval_date = approval
-        packed = {
-            "name": name.strip(),
-            "title": (st.session_state.get("plan_traveler_title") or "").strip(),
-            "team": (st.session_state.get("plan_traveler_team") or "").strip(),
-            "approval": approval_date.isoformat(),
-            "departure": departure.isoformat(),
-            "return_on": return_on.isoformat(),
-            "warnings": result.warnings,
-            "result": result,
-        }
-        st.session_state["calc_result"] = packed
-        st.session_state.calc_results[name.strip() or "_"] = packed
+        party_calcs = calculate_for_members(inp, members)
+        packed_party = []
+        for item in party_calcs:
+            packed_party.append(
+                {
+                    "name": item.member.name,
+                    "title": item.member.title,
+                    "team": item.member.team,
+                    "member": item.member,
+                    "approval": approval.isoformat(),
+                    "departure": departure.isoformat(),
+                    "return_on": return_on.isoformat(),
+                    "warnings": item.result.warnings,
+                    "result": item.result,
+                }
+            )
+        st.session_state["calc_party"] = packed_party
+        st.session_state["calc_result"] = packed_party[0]
+        st.session_state.calc_results[packed_party[0]["name"].strip() or "_"] = packed_party[0]
 
-    current_name = (name or "").strip() or "_"
-    packed = st.session_state.get("calc_results", {}).get(current_name)
-    if packed is None and not st.session_state.get("plan_document"):
-        packed = st.session_state.get("calc_result")
-    if not packed:
+    packed_party = list(st.session_state.get("calc_party") or [])
+    if not packed_party:
+        current_name = (name or "").strip() or "_"
+        packed = st.session_state.get("calc_results", {}).get(current_name)
+        if packed is None and not st.session_state.get("plan_document"):
+            packed = st.session_state.get("calc_result")
+        if packed:
+            packed_party = [packed]
+    if not packed_party:
         return
 
+    packed = packed_party[0]
     result = packed["result"]
     dest = " / ".join(
         f"{stay.place_label} {stay.nights}박 {stay.stay_days}일 ({stay.grade}"
@@ -710,14 +859,19 @@ def main() -> None:
     with st.container(border=True):
         st.subheader("3. 자동계산 결과")
         st.markdown("**출장정보**")
+        traveler_line = " / ".join(
+            f"{item.get('name') or '-'} · {item['result'].role}"
+            for item in packed_party
+        )
         st.write(
-            f"- 출장자: {packed['name'] or '-'} · {result.role}\n"
+            f"- 출장자: {traveler_line}\n"
             f"- 출장지: {dest}\n"
             f"- 지역등급: {result.grade}\n"
             f"- 출장일수: {result.trip_days}일 · 숙박일수: {result.lodging_nights}박"
             f" · 체류일: {sum(stay.stay_days or 0 for stay in result.stays)}일"
             + (f" · 차량임차: {result.rental_days}일 (일비 1/2)" if result.rental_days else "")
             + (f" · 조식 포함: {result.breakfast_nights}일 (식비 1/3 공제)" if result.breakfast_nights else "")
+            + (f" · {len(packed_party)}인 합산" if len(packed_party) > 1 else "")
         )
         st.markdown("**적용환율**")
         st.markdown(
@@ -736,6 +890,14 @@ def main() -> None:
                 f"{_amount(result.lodging.excess_krw)} 초과"
             )
         st.markdown("**여비 계산**")
+        if len(packed_party) > 1:
+            st.markdown(
+                "\n".join(
+                    f"- {item.get('name') or '-'} ({item['result'].role}): {_amount(item['result'].total_krw)}"
+                    for item in packed_party
+                )
+            )
+            st.caption("아래 금액은 1인 기준입니다. 심사신청서 소요예산은 인원 합산입니다.")
         st.markdown(
             f"- 항공료: {_amount(result.airfare_krw)} ({result.airfare_payment_method})\n"
             f"- 일비: {_amount(result.daily.amount_krw)} ({daily_detail})\n"
@@ -747,18 +909,27 @@ def main() -> None:
             f"- 엑셀: L열 원화금액은 1원 단위, C열 집행금액·합계와 M열은 원단위 절사"
         )
 
+        total_krw = sum(item["result"].total_krw for item in packed_party)
+        corp_krw = sum(item["result"].corporate_card_total for item in packed_party)
+        personal_krw = sum(item["result"].personal_transfer_total for item in packed_party)
         m1, m2, m3 = st.columns(3)
-        m1.metric("총액", _won(result.total_krw))
-        m2.metric("법인카드 결제", _won(result.corporate_card_total))
-        m3.metric("개인지급(계좌이체)", _won(result.personal_transfer_total))
+        m1.metric("총액", _won(total_krw))
+        m2.metric("법인카드 결제", _won(corp_krw))
+        m3.metric("개인지급(계좌이체)", _won(personal_krw))
 
-        for warn in packed["warnings"]:
-            st.warning(warn)
+        seen_warn = set()
+        for item in packed_party:
+            for warn in item["warnings"]:
+                if warn in seen_warn:
+                    continue
+                seen_warn.add(warn)
+                st.warning(warn)
 
-        excel_name = excel_filename(packed["name"], date.fromisoformat(packed["approval"]))
+        party_results = _to_party_results(packed_party)
         approval_date = date.fromisoformat(packed["approval"])
+        excel_name = excel_filename_for_party(party_results, approval_date)
         try:
-            excel_bytes = build_excel_bytes(result, packed["name"], approval_date)
+            excel_bytes = build_party_excel_bytes(party_results, approval_date)
         except FileNotFoundError:
             excel_bytes = None
         plan = _refresh_plan_document(st.session_state.get("plan_document"))
@@ -783,18 +954,16 @@ def main() -> None:
                 departure=departure,
                 return_on=return_on,
                 approval_date=approval_date,
+                party=party_results,
             )
         except Exception as exc:
             hwp_bytes = None
             hwp_error = str(exc)
-        hwp_name = hwp_filename(packed["name"], title, approval_date)
+        hwp_name = hwp_filename_for_party(party_results, approval_date)
         plan_excel_error = ""
         try:
-            plan_excel_bytes = build_plan_excel_bytes(
-                result,
-                packed["name"],
-                title=title,
-                team=team,
+            plan_excel_bytes = build_party_plan_excel_bytes(
+                party_results,
                 plan=plan,
                 departure=departure,
                 return_on=return_on,
@@ -803,7 +972,7 @@ def main() -> None:
         except Exception as exc:
             plan_excel_bytes = None
             plan_excel_error = str(exc)
-        plan_excel_name = plan_excel_filename(packed["name"], approval_date)
+        plan_excel_name = plan_excel_filename_for_party(party_results, approval_date)
         down_col1, down_col2 = st.columns(2)
         with down_col1:
             if excel_bytes:

@@ -184,6 +184,35 @@ class TravelResult:
     breakfast_nights: int = 0
 
 
+@dataclass(frozen=True)
+class PartyMember:
+    name: str
+    role: str
+    title: str = ""
+    team: str = ""
+
+
+@dataclass(frozen=True)
+class PartyResult:
+    member: PartyMember
+    result: TravelResult
+
+
+def party_filename_label(names: list[str]) -> str:
+    cleaned = [item.strip() for item in names if item and item.strip()]
+    if not cleaned:
+        return "미기재"
+    if len(cleaned) == 1:
+        return cleaned[0]
+    return f"{cleaned[0]}외{len(cleaned) - 1}"
+
+
+def calculate_for_members(base: TravelInput, members: list[PartyMember]) -> list[PartyResult]:
+    """같은 일정·비용으로 출장자마다 직급 기준액을 따로 계산한다."""
+    people = members or [PartyMember(name="", role=base.role)]
+    return [PartyResult(member=person, result=calculate_travel(replace(base, role=person.role))) for person in people]
+
+
 def resolved_stays(inp: TravelInput) -> list[StayInput]:
     if inp.stays:
         return list(inp.stays)

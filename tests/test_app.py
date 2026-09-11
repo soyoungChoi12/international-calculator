@@ -260,3 +260,48 @@ def test_calculate_with_stale_plan_session_does_not_crash():
     assert any(button.label == "Excel 다운로드" for button in at.download_button)
     assert any(button.label == "심사신청서(HWP) 다운로드" for button in at.download_button)
     assert any(button.label == "해외출장 계획 엑셀 다운로드" for button in at.download_button)
+
+
+def test_add_traveler_shows_second_name_and_role():
+    at = AppTest.from_file(str(APP_PATH))
+    at.run()
+    next(button for button in at.button if button.label == "출장자 추가").click().run()
+    names = [widget for widget in at.text_input if str(widget.label).startswith("출장자명")]
+    roles = [widget for widget in at.selectbox if str(widget.label).startswith("출장자 구분")]
+    assert len(names) == 2
+    assert len(roles) == 2
+    assert any("1인 기준" in caption.value for caption in at.caption)
+
+
+def test_multi_traveler_plan_prefills_and_calculates_together():
+    from services.plan_parser import parse_plan_text
+    from tests.test_plan_parser import MULTI_TRAVELER_PLAN
+
+    at = AppTest.from_file(str(APP_PATH))
+    at.session_state["plan_document"] = parse_plan_text(MULTI_TRAVELER_PLAN)
+    at.run()
+    assert not at.exception
+    assert all(widget.label != "계산할 출장자" for widget in at.radio)
+    names = [widget for widget in at.text_input if str(widget.label).startswith("출장자명")]
+    assert [widget.value for widget in names] == ["이한주", "김기현", "이종휘"]
+
+    _by_label(at.date_input, "출국일").set_value(date(2026, 9, 1))
+    _by_label(at.date_input, "귀국일").set_value(date(2026, 9, 5))
+    at.run()
+    _by_label(at.selectbox, "출장 국가").select("미국")
+    _by_label(at.text_input, "출장 도시").set_value("샌프란시스코")
+    _by_label(at.number_input, "적용환율 (USD/KRW)").set_value(1400.0)
+    _by_label(at.number_input, "항공료 (원)").set_value(1_200_000)
+    _by_label(at.number_input, "숙박비 실비 (원)").set_value(750_000)
+    _by_label(at.number_input, "준비금 (원)").set_value(70_000)
+    next(button for button in at.button if button.label == "여비 계산").click()
+    at.run()
+    assert not at.exception
+    assert not at.error
+    result_text = "\n".join(item.value for item in at.markdown) + "\n".join(
+        f"{item.label}:{item.value}" for item in at.metric
+    )
+    assert "이한주" in result_text
+    assert "이종휘" in result_text
+    assert any(button.label == "Excel 다운로드" for button in at.download_button)
+

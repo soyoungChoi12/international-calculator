@@ -9,14 +9,17 @@ import pytest
 
 from data.travel_rates import PAYMENT_CORPORATE, PAYMENT_PERSONAL, get_daily_rate_usd
 from services.travel_calculator import (
+    PartyMember,
     StayInput,
     TravelInput,
-    calculate_trip_days,
+    calculate_for_members,
     calculate_travel,
+    calculate_trip_days,
+    execution_krw,
     lodging_actual_by_grade,
+    party_filename_label,
     round_to_ten,
     settle_lodging,
-    execution_krw,
     truncate_to_ten,
     truncate_to_won,
     usd_to_krw_truncated,
@@ -331,3 +334,25 @@ def test_breakfast_nights_cannot_exceed_stay_days():
     )
     assert result.breakfast_nights == 4
     assert result.meal.amount_usd == 45 * 4
+
+
+def test_calculate_for_members_uses_each_role():
+    party = calculate_for_members(
+        _sample(),
+        [
+            PartyMember(name="이한주", role="팀장 및 팀원", title="전임"),
+            PartyMember(name="이종휘", role="본부장", title="본부장"),
+        ],
+    )
+    assert [item.member.name for item in party] == ["이한주", "이종휘"]
+    assert party[0].result.daily.rate_usd == 26
+    assert party[1].result.daily.rate_usd == 30
+    assert party[0].result.meal.amount_usd == 335
+    assert party[1].result.meal.amount_usd == 81 * 5
+    assert party[0].result.airfare_krw == party[1].result.airfare_krw
+
+
+def test_party_filename_label_adds_extra_count():
+    assert party_filename_label(["이한주"]) == "이한주"
+    assert party_filename_label(["이한주", "김기현", "이종휘"]) == "이한주외2"
+    assert party_filename_label(["", " "]) == "미기재"

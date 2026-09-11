@@ -15,16 +15,22 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from services.plan_parser import PlanDocument
-from services.travel_calculator import TravelResult
+from services.travel_calculator import PartyMember, PartyResult, TravelResult, party_filename_label
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "templates" / "26년 직원 해외출장 계획.xlsx"
 SHEET_NAME = "2026"
 TITLE_ORG = "경기창조경제혁신센터 해외출장 계획"
 
 
-def plan_excel_filename(traveler_name: str, when: date) -> str:
+def plan_excel_filename(traveler_name: str, when: date, extra_count: int = 0) -> str:
     safe = re.sub(r'[\\/:*?"<>|]', "", (traveler_name or "").strip()) or "미기재"
+    if extra_count:
+        safe = f"{safe}외{extra_count}"
     return f"{when.year % 100}년 직원 해외출장 계획_{safe}({when.strftime('%y%m%d')}).xlsx"
+
+
+def plan_excel_filename_for_party(party: list[PartyResult], when: date) -> str:
+    return plan_excel_filename(party_filename_label([item.member.name for item in party]), when)
 
 
 def build_plan_excel_bytes(
@@ -37,7 +43,34 @@ def build_plan_excel_bytes(
     departure: date | None = None,
     return_on: date | None = None,
     approval_date: date | None = None,
+    party: list[PartyResult] | None = None,
 ) -> bytes:
+    when = approval_date or date.today()
+    entries = party or [
+        PartyResult(
+            member=PartyMember(name=traveler_name, role=result.role, title=title, team=team),
+            result=result,
+        )
+    ]
+    return build_party_plan_excel_bytes(
+        entries,
+        plan=plan,
+        departure=departure,
+        return_on=return_on,
+        approval_date=when,
+    )
+
+
+def build_party_plan_excel_bytes(
+    party: list[PartyResult],
+    *,
+    plan: PlanDocument | None = None,
+    departure: date | None = None,
+    return_on: date | None = None,
+    approval_date: date | None = None,
+) -> bytes:
+    if not party:
+        raise ValueError("출장자 계산 결과가 없습니다.")
     if not TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"해외출장 계획 템플릿을 찾을 수 없습니다: {TEMPLATE_PATH}")
     when = approval_date or date.today()
@@ -47,12 +80,9 @@ def build_plan_excel_bytes(
         work_path = Path(tmp) / TEMPLATE_PATH.name
         shutil.copy2(TEMPLATE_PATH, work_path)
         wb = load_workbook(work_path)
-        _fill_workbook(
+        _fill_party_workbook(
             wb,
-            result,
-            traveler_name,
-            title=title,
-            team=team,
+            party,
             plan=plan,
             start=start,
             end=end,
@@ -64,8 +94,61 @@ def build_plan_excel_bytes(
         return buffer.getvalue()
 
 
-def _fill_workbook(
+def _fill_party_workbook(
     wb,
+    party: list[PartyResult],
+    *,
+    plan: PlanDocument | None,
+    start: date | None,
+    end: date | None,
+    approval_date: date,
+) -> None:
+    source = wb[SHEET_NAME] if SHEET_NAME in wb.sheetnames else wb[wb.sheetnames[0]]
+    sheets = [source]
+    used = set(wb.sheetnames)
+    for _item in party[1:]:
+        copied = wb.copy_worksheet(source)
+        sheets.append(copied)
+        used.add(copied.title)
+    if len(party) == 1:
+        titles = [source.title]
+    else:
+        titles = []
+        used.discard(source.title)
+        for copied in sheets[1:]:
+            used.discard(copied.title)
+        for item in party:
+            titles.append(_safe_sheet_title(item.member.name, used))
+    for ws, title, item in zip(sheets, titles, party):
+        ws.title = title
+        _fill_sheet(
+            ws,
+            item.result,
+            item.member.name,
+            title=item.member.title,
+            team=item.member.team,
+            plan=plan,
+            start=start,
+            end=end,
+            approval_date=approval_date,
+        )
+
+
+def _safe_sheet_title(name: str, used: set[str]) -> str:
+    safe = re.sub(r'[:\\/?*\[\]]', "", (name or "").strip()) or "출장자"
+    safe = safe[:31]
+    candidate = safe
+    index = 2
+    while candidate in used:
+        suffix = f"_{index}"
+        candidate = f"{safe[: 31 - len(suffix)]}{suffix}"
+        index += 1
+    used.add(candidate)
+    return candidate
+
+
+def _fill_sheet(
+    ws,
     result: TravelResult,
     traveler_name: str,
     *,
@@ -76,7 +159,6 @@ def _fill_workbook(
     end: date | None,
     approval_date: date,
 ) -> None:
-    ws = wb[SHEET_NAME] if SHEET_NAME in wb.sheetnames else wb[wb.sheetnames[0]]
     year = (start or approval_date).year
     ws["B1"] = f"{year} {TITLE_ORG}"
     grade = _place_grade(result, plan)

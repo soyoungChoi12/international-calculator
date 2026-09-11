@@ -9,7 +9,7 @@ import olefile
 
 from services.hwp_export import TEMPLATE_PATH, build_hwp_bytes, build_hwp_fields, hwp_filename
 from services.plan_parser import PlanDocument, parse_plan_pdf, parse_plan_text
-from services.travel_calculator import StayInput, TravelInput, calculate_travel
+from services.travel_calculator import PartyMember, PartyResult, StayInput, TravelInput, calculate_travel
 from tests.test_plan_parser import SAMPLE_PLAN
 
 
@@ -197,6 +197,52 @@ def test_breakfast_note_in_hwp_budget():
         return_on=date(2026, 7, 3),
     )
     assert "식  비 : 227,180원($148, 조식 3일 1/3 공제)" in fields["budget"]
+
+
+def test_multi_traveler_hwp_lists_people_and_sums_budget():
+    plan = parse_plan_text(SAMPLE_PLAN)
+    plan = PlanDocument(
+        **{
+            **plan.__dict__,
+            "domestic_krw": 30_000,
+            "headquarters": "글로벌본부",
+            "airfare_note": " (김포 - 간사이공항)",
+            "preparation_items": (("여행자보험비", 70_000), ("오사카-교토 왕복기차비", 80_000)),
+        }
+    )
+    result = calculate_travel(_kyoto_input())
+    party = [
+        PartyResult(
+            member=PartyMember(name="이한주", role="팀장 및 팀원", title="전임", team="글로벌전략협업팀"),
+            result=result,
+        ),
+        PartyResult(
+            member=PartyMember(name="김기현", role="팀장 및 팀원", title="팀장", team="글로벌전략협업팀"),
+            result=result,
+        ),
+    ]
+    fields = build_hwp_fields(
+        result,
+        "이한주",
+        title="전임",
+        team="글로벌전략협업팀",
+        plan=plan,
+        departure=date(2026, 6, 30),
+        return_on=date(2026, 7, 3),
+        party=party,
+    )
+    assert "이한주 전임" in fields["traveler"]
+    assert "김기현 팀장" in fields["traveler"]
+    assert fields["budget_who"] == ""
+    assert fields["category_who"] == "출장자 2인"
+    assert "총 3,454,420원(나 지역, 3박 4일, 2인)" in fields["budget"]
+    assert "왕복항공료 : 1,040,600원 (김포 - 간사이공항)" in fields["budget"]
+    assert "대중교통운임비(공항) : 60,000원" in fields["budget"]
+    assert "숙박비 : 1,132,820원($123x3=$369 × 2인)" in fields["budget"]
+    assert "일  비 : 319,280원($26x4=$104 × 2인)" in fields["budget"]
+    assert "식  비 : 601,720원($49x4=$196 × 2인)" in fields["budget"]
+    assert "여행자보험비 : 140,000원" in fields["budget"]
+    assert "오사카-교토 왕복기차비 : 160,000원" in fields["budget"]
 
 
 def test_build_hwp_bytes_writes_preview_and_body():
