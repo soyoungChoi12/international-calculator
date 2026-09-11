@@ -211,7 +211,11 @@ def _budget_text(
         lines.append(f"   ·일  비 : {_won(daily_krw)}(${daily_rate}x{days}=${daily_rate * days})")
     else:
         lines.append(f"   ·일  비 : {_won(daily_krw)}")
-    if meal_rate and days:
+    if result.breakfast_nights:
+        lines.append(
+            f"   ·식  비 : {_won(meal_krw)}(${result.meal.amount_usd}, 조식 {result.breakfast_nights}일 1/3 공제)"
+        )
+    elif meal_rate and days:
         lines.append(f"   ·식  비 : {_won(meal_krw)}(${meal_rate}x{days}=${meal_rate * days})")
     else:
         lines.append(f"   ·식  비 : {_won(meal_krw)}")

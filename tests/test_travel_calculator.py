@@ -113,6 +113,7 @@ def test_spec_example_under_ceiling():
         "가": {"daily": 5, "lodging": 4, "meal": 5},
     }
     assert result.stays[0].stay_days == 5
+    assert result.breakfast_nights == 0
 
 
 def test_lodging_over_ceiling_keeps_actual_and_notes_excess():
@@ -301,3 +302,32 @@ def test_rental_days_over_stay_days_is_warning():
     )
     assert validation.ok
     assert any("차량 임차" in warning for warning in validation.warnings)
+
+
+def test_breakfast_included_deducts_one_third_meal_per_night():
+    """4박 5일 가 지역, 조식 포함이면 식비 1일 전액 + 4일 2/3."""
+    result = calculate_travel(
+        _sample(
+            stays=[StayInput("미국", "샌프란시스코", 4, "가", stay_days=5, breakfast_included=True)],
+        )
+    )
+    assert result.breakfast_nights == 4
+    assert result.meal.amount_usd == 67 + 45 * 4
+    assert result.meal.amount_krw == 93_800 + 252_000
+    assert result.meal.slices[0].rate_usd == 67
+    assert result.meal.slices[0].quantity == 1
+    assert result.meal.slices[1].rate_usd == 45
+    assert result.meal.slices[1].quantity == 4
+    assert result.meal.slices[1].label == "조식 1/3 공제"
+    assert result.total_krw == 2_671_000 - 123_200
+
+
+def test_breakfast_nights_cannot_exceed_stay_days():
+    result = calculate_travel(
+        _sample(
+            lodging_nights=5,
+            stays=[StayInput("미국", "샌프란시스코", 5, "가", stay_days=4, breakfast_included=True)],
+        )
+    )
+    assert result.breakfast_nights == 4
+    assert result.meal.amount_usd == 45 * 4

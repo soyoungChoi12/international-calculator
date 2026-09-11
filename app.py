@@ -9,17 +9,21 @@ from datetime import date, datetime
 import streamlit as st
 
 from config.excel_mapping import FX_SOURCE_CAPTION
+from data import travel_rates
 from data.travel_rates import GRADES, PAYMENT_CORPORATE, PAYMENT_PERSONAL, PAYMENT_METHODS, ROLES
 from services.destination_grade_service import list_countries, resolve_destination_grade
-from services.excel_export import build_excel_bytes, excel_filename
 from services.hana_fx import quote_caption
-from services import cfb_writer, hana_fx, hwp_export, plan_excel_export, plan_parser
+from services import cfb_writer, excel_export, hana_fx, hwp_export, plan_excel_export, plan_parser, travel_calculator
 
+importlib.reload(travel_rates)
+importlib.reload(travel_calculator)
+importlib.reload(excel_export)
 importlib.reload(plan_parser)
 importlib.reload(cfb_writer)
 importlib.reload(hwp_export)
 importlib.reload(plan_excel_export)
 
+from services.excel_export import build_excel_bytes, excel_filename
 from services.hwp_export import build_hwp_bytes, hwp_filename
 from services.plan_excel_export import build_plan_excel_bytes, plan_excel_filename
 from services.plan_parser import PlanDocument, parse_plan_pdf, parse_plan_text
@@ -363,6 +367,11 @@ def _render_stay(
             key=nights_key,
         )
     )
+    breakfast_included = st.checkbox(
+        "조식 포함",
+        key=f"stay_breakfast_{stay_id}",
+        help="체크하면 이 출장지의 숙박일수만큼 식비 1/3을 공제합니다.",
+    )
 
     is_last = index == total
     if is_last:
@@ -405,6 +414,7 @@ def _render_stay(
             grade_message="",
             stay_days=stay_days,
             actual_krw=actual_krw,
+            breakfast_included=breakfast_included,
         )
     return StayInput(
         country=country_text,
@@ -414,6 +424,7 @@ def _render_stay(
         grade_message=grade_message,
         stay_days=stay_days,
         actual_krw=actual_krw,
+        breakfast_included=breakfast_included,
     )
 
 
@@ -543,11 +554,17 @@ def main() -> None:
         )
         extra = f" · {stay_caption}" if stay_caption else ""
         rental_caption = f" · 차량임차 {total_rental_days}일(일비 1/2)" if total_rental_days else ""
+        breakfast_nights = sum(
+            min(stay.nights, stay.stay_days or 0)
+            for stay in rendered_stays
+            if stay.breakfast_included
+        )
+        breakfast_caption = f" · 조식 포함 {breakfast_nights}박(식비 1/3 공제)" if breakfast_nights else ""
         lodging_total = sum(stay.actual_krw for stay in rendered_stays)
         lodging_caption = f" · 숙박실비 {lodging_total:,}원" if lodging_total else ""
         st.caption(
             f"출장일수 {trip_days}일 (출국일·귀국일 포함) · 숙박 {total_nights}박 · "
-            f"체류 {total_stay_days}일{rental_caption}{lodging_caption}{extra} · "
+            f"체류 {total_stay_days}일{rental_caption}{breakfast_caption}{lodging_caption}{extra} · "
             f"환율 기준일 {approval.isoformat()} · 출처: {FX_SOURCE_CAPTION}"
         )
         if len(stay_ids) > 1:
@@ -684,6 +701,7 @@ def main() -> None:
         f"{stay.place_label} {stay.nights}박 {stay.stay_days}일 ({stay.grade}"
         + (f", {stay.grade_message}" if stay.grade_message else "")
         + (f", 차량임차 {stay.rental_days}일" if stay.rental_days else "")
+        + (f", 조식 포함 {stay.nights}박" if stay.breakfast_included and stay.nights else "")
         + (f", 숙박실비 {stay.actual_krw:,}원" if stay.actual_krw else "")
         + ")"
         for stay in result.stays
@@ -699,6 +717,7 @@ def main() -> None:
             f"- 출장일수: {result.trip_days}일 · 숙박일수: {result.lodging_nights}박"
             f" · 체류일: {sum(stay.stay_days or 0 for stay in result.stays)}일"
             + (f" · 차량임차: {result.rental_days}일 (일비 1/2)" if result.rental_days else "")
+            + (f" · 조식 포함: {result.breakfast_nights}일 (식비 1/3 공제)" if result.breakfast_nights else "")
         )
         st.markdown("**적용환율**")
         st.markdown(

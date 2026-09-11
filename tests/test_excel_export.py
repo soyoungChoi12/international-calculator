@@ -112,6 +112,19 @@ def test_multi_city_fills_grade_a_and_b_day_cells():
     wb.close()
 
 
+def test_breakfast_writes_meal_note_and_reduced_amount():
+    result = calculate_travel(
+        _sample(stays=[StayInput("미국", "샌프란시스코", 4, "가", stay_days=5, breakfast_included=True)])
+    )
+    wb, _ = _workbook(result)
+    ws = wb[OUTPUT_SHEET_NAME]
+    assert ws["C8"].value == 345_800
+    assert ws["E8"].value == "조식 4일 식비 1/3 공제"
+    assert ws["J9"].value == 5
+    assert ws["K9"].value == 67 + 45 * 4
+    wb.close()
+
+
 def test_rental_days_write_daily_note_and_half_amount():
     result = calculate_travel(
         _sample(stays=[StayInput("미국", "샌프란시스코", 4, "가", stay_days=5, rental_days=2)])

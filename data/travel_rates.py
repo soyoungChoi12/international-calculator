@@ -24,6 +24,9 @@ PAYMENT_METHODS = (PAYMENT_CORPORATE, PAYMENT_PERSONAL)
 # 차량 임차 사용일은 기준액의 1/2
 DAILY_RENTAL_DIVISOR = 2
 DAILY_RENTAL_LABEL = "차량임차 1/2"
+# 조식이 제공되는 날은 식비의 1/3 공제
+MEAL_BREAKFAST_DIVISOR = 3
+MEAL_BREAKFAST_LABEL = "조식 1/3 공제"
 
 DAILY_ALLOWANCE_USD = {
     "센터장": 40,
@@ -59,3 +62,9 @@ def get_lodging_rate_usd(role: str, grade: str) -> int:
 
 def get_meal_rate_usd(role: str, grade: str) -> int:
     return MEAL_USD[role][grade]
+
+
+def get_meal_breakfast_rate_usd(role: str, grade: str) -> int:
+    """조식 제공일 식비. 기준액에서 1/3을 뺀 나머지."""
+    rate = get_meal_rate_usd(role, grade)
+    return rate - rate // MEAL_BREAKFAST_DIVISOR

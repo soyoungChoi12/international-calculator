@@ -118,6 +118,8 @@ def _fill_workbook(wb, result: TravelResult, approval_date: date) -> None:
 
     if result.rental_days:
         ws[cells["daily_note"]] = f"차량임차 {result.rental_days}일 일비 1/2 적용"
+    if result.breakfast_nights:
+        ws[cells["meal_note"]] = f"조식 {result.breakfast_nights}일 식비 1/3 공제"
     if result.lodging.note:
         ws[cells["lodging_note"]] = result.lodging.note
 

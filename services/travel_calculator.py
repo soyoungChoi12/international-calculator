@@ -15,6 +15,7 @@ from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from data.travel_rates import (
     DAILY_RENTAL_LABEL,
     GRADES,
+    MEAL_BREAKFAST_LABEL,
     PAYMENT_CORPORATE,
     PAYMENT_METHODS,
     PAYMENT_PERSONAL,
@@ -23,6 +24,7 @@ from data.travel_rates import (
     get_daily_rate_usd,
     get_daily_rental_rate_usd,
     get_lodging_rate_usd,
+    get_meal_breakfast_rate_usd,
     get_meal_rate_usd,
 )
 
@@ -89,6 +91,7 @@ class StayInput:
     stay_days: int | None = None
     rental_days: int = 0
     actual_krw: int = 0
+    breakfast_included: bool = False
 
     @property
     def place_label(self) -> str:
@@ -178,6 +181,7 @@ class TravelResult:
     stays: tuple[StayInput, ...] = ()
     grade_quantities: dict[str, dict[str, int]] = field(default_factory=dict)
     rental_days: int = 0
+    breakfast_nights: int = 0
 
 
 def resolved_stays(inp: TravelInput) -> list[StayInput]:
@@ -365,10 +369,27 @@ def calculate_lodging_ceiling(
     return rate_usd, ceiling_usd, ceiling_krw
 
 
-def allocate_meal_days(stays: list[StayInput], trip_days: int) -> list[tuple[StayInput, int]]:
-    """식비 일수: 도시별 체류일. 없으면 숙박일수 + 남는 출장일수는 마지막 숙박지."""
-    filled = apply_default_stay_days(stays, trip_days)
-    return [(stay, stay.stay_days or 0) for stay in filled]
+def breakfast_days_for_stay(stay: StayInput) -> int:
+    """조식 공제 일수. 숙박한 날만 해당하며 체류일을 넘지 않는다."""
+    if not stay.breakfast_included:
+        return 0
+    days = stay.stay_days or 0
+    return min(max(stay.nights, 0), days)
+
+
+def meal_items_from_stays(stays: list[StayInput], role: str) -> list[tuple[str, int, int, str]]:
+    """식비 조각. 조식 포함 숙박일은 기준액의 1/3을 뺀다."""
+    items: list[tuple[str, int, int, str]] = []
+    for stay in stays:
+        days = stay.stay_days or 0
+        rate = get_meal_rate_usd(role, stay.grade)
+        breakfast = breakfast_days_for_stay(stay)
+        full = days - breakfast
+        if full:
+            items.append((stay.grade, rate, full, ""))
+        if breakfast:
+            items.append((stay.grade, get_meal_breakfast_rate_usd(role, stay.grade), breakfast, MEAL_BREAKFAST_LABEL))
+    return items
 
 
 def daily_items_from_stays(stays: list[StayInput], role: str) -> list[tuple[str, int, int, str]]:
@@ -537,11 +558,8 @@ def calculate_travel(inp: TravelInput) -> TravelResult:
         inp.daily_payment_method,
     )
 
-    meal_items = [
-        (stay.grade, get_meal_rate_usd(inp.role, stay.grade), stay.stay_days or 0)
-        for stay in stays
-    ]
-    meal = _line_from_slices(_slices_by_grade(meal_items, inp.exchange_rate), inp.meal_payment_method)
+    meal = _line_from_slices(_slices_by_grade(meal_items_from_stays(stays, inp.role), inp.exchange_rate), inp.meal_payment_method)
+    breakfast_nights = sum(breakfast_days_for_stay(stay) for stay in stays)
 
     lodging_items = [
         (stay.grade, get_lodging_rate_usd(inp.role, stay.grade), stay.nights)
@@ -599,5 +617,6 @@ def calculate_travel(inp: TravelInput) -> TravelResult:
         stays=tuple(stays),
         grade_quantities=grade_block_quantities(stays),
         rental_days=rental_days,
+        breakfast_nights=breakfast_nights,
     )
 

@@ -71,6 +71,12 @@ def test_add_stay_shows_second_destination():
     assert any("체류일 합계" in caption.value for caption in at.caption)
 
 
+def test_breakfast_checkbox_is_visible():
+    at = AppTest.from_file(str(APP_PATH))
+    at.run()
+    assert any(widget.label == "조식 포함" for widget in at.checkbox)
+
+
 def test_add_rental_shows_rental_days():
     at = AppTest.from_file(str(APP_PATH))
     at.run()
