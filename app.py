@@ -488,19 +488,11 @@ def _render_stay(
             key=nights_key,
         )
     )
-    breakfast_col, boost_col = st.columns(2)
-    with breakfast_col:
-        breakfast_included = st.checkbox(
-            "조식 포함",
-            key=f"stay_breakfast_{stay_id}",
-            help="체크하면 이 출장지의 숙박일수만큼 식비 1/3을 공제합니다.",
-        )
-    with boost_col:
-        lodging_boosted = st.checkbox(
-            "숙박비 1.5배 적용",
-            key=f"stay_boost_{stay_id}",
-            help="체크하면 이 출장지의 숙박상한을 기준액의 1.5배로 계상합니다.",
-        )
+    breakfast_included = st.checkbox(
+        "조식 포함",
+        key=f"stay_breakfast_{stay_id}",
+        help="체크하면 이 출장지의 숙박일수만큼 식비 1/3을 공제합니다.",
+    )
 
     is_last = index == total
     if is_last:
@@ -522,6 +514,11 @@ def _render_stay(
         )
     )
 
+    lodging_boosted = st.checkbox(
+        "숙박비 1.5배",
+        key=f"stay_boost_{stay_id}",
+        help="체크하면 이 출장지의 숙박상한을 기준액의 1.5배로 계상합니다.",
+    )
     actual_label = "숙박비 실비 (원)" if total == 1 else f"숙박비 실비 (원) {index}"
     actual_raw = st.number_input(
         actual_label,
