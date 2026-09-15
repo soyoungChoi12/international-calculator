@@ -27,6 +27,10 @@ DAILY_RENTAL_LABEL = "차량임차 1/2"
 # 조식이 제공되는 날은 식비의 1/3 공제
 MEAL_BREAKFAST_DIVISOR = 3
 MEAL_BREAKFAST_LABEL = "조식 1/3 공제"
+# 숙박비 1.5배 적용 시 기준액의 3/2
+LODGING_BOOST_NUMERATOR = 3
+LODGING_BOOST_DENOMINATOR = 2
+LODGING_BOOST_LABEL = "숙박 1.5배"
 
 DAILY_ALLOWANCE_USD = {
     "센터장": 40,
@@ -58,6 +62,11 @@ def get_daily_rental_rate_usd(role: str) -> int:
 
 def get_lodging_rate_usd(role: str, grade: str) -> int:
     return LODGING_USD[role][grade]
+
+
+def get_lodging_boosted_rate_usd(role: str, grade: str) -> int:
+    """숙박 1.5배 적용 시 1박 단가. 기준액 × 3/2 (소수 절사)."""
+    return get_lodging_rate_usd(role, grade) * LODGING_BOOST_NUMERATOR // LODGING_BOOST_DENOMINATOR
 
 
 def get_meal_rate_usd(role: str, grade: str) -> int:

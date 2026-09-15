@@ -199,6 +199,33 @@ def test_breakfast_note_in_hwp_budget():
     assert "식  비 : 227,180원($148, 조식 3일 1/3 공제)" in fields["budget"]
 
 
+def test_lodging_boost_note_in_hwp_budget():
+    result = calculate_travel(
+        TravelInput(
+            role="팀장 및 팀원",
+            grade="나",
+            departure_date=date(2026, 6, 30),
+            return_date=date(2026, 7, 3),
+            lodging_nights=3,
+            exchange_rate=1535,
+            airfare_krw=520_300,
+            lodging_actual_krw=0,
+            preparation_krw=150_000,
+            stays=[StayInput("일본", "교토", 3, "나", stay_days=4, lodging_boosted=True)],
+        )
+    )
+    fields = build_hwp_fields(
+        result,
+        "이한주",
+        title="전임",
+        team="글로벌전략협업팀",
+        plan=None,
+        departure=date(2026, 6, 30),
+        return_on=date(2026, 7, 3),
+    )
+    assert "숙박비 : 847,320원($552, 숙박 3박 1.5배)" in fields["budget"]
+
+
 def test_multi_traveler_hwp_lists_people_and_sums_budget():
     plan = parse_plan_text(SAMPLE_PLAN)
     plan = PlanDocument(

@@ -75,6 +75,7 @@ def test_breakfast_checkbox_is_visible():
     at = AppTest.from_file(str(APP_PATH))
     at.run()
     assert any(widget.label == "조식 포함" for widget in at.checkbox)
+    assert any(widget.label == "숙박비 1.5배 적용" for widget in at.checkbox)
 
 
 def test_add_rental_shows_rental_days():

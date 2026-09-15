@@ -229,9 +229,8 @@ def _budget_text(
     daily_rates = {item.daily.rate_usd for item in items}
     meal_rates = {item.meal.rate_usd for item in items}
     rate = first.lodging.rate_usd if len(lodging_rates) == 1 else 0
-    lodging_usd = sum(
-        (item.lodging.rate_usd * nights) if item.lodging.rate_usd and nights else 0 for item in items
-    )
+    lodging_usd = sum(item.lodging.ceiling_usd for item in items)
+    lodging_boost_nights = sum(item.lodging_boost_nights for item in items)
     daily_usd = sum(item.daily.amount_usd for item in items)
     meal_usd = sum(item.meal.amount_usd for item in items)
     grade_label = f"{grade} 지역" if grade else ""
@@ -248,7 +247,9 @@ def _budget_text(
         lines.append(f"   ·대중교통운임비(공항) : {_won(domestic)}")
     lines.append(f"  - 출장비 : {_won(allow)}")
     usd_note = ""
-    if rate and nights:
+    if lodging_boost_nights:
+        usd_note = f"(${lodging_usd}, 숙박 {lodging_boost_nights}박 1.5배)"
+    elif rate and nights:
         per = rate * nights
         usd_note = f"(${rate}x{nights}=${per})" if count == 1 else f"(${rate}x{nights}=${per} × {count}인)"
     lines.append(f"   ·숙박비 : {_won(lodging_krw)}{usd_note}")

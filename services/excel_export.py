@@ -184,8 +184,13 @@ def _fill_sheet(ws: Worksheet, result: TravelResult, approval_date: date) -> Non
         ws[cells["daily_note"]] = f"차량임차 {result.rental_days}일 일비 1/2 적용"
     if result.breakfast_nights:
         ws[cells["meal_note"]] = f"조식 {result.breakfast_nights}일 식비 1/3 공제"
+    lodging_notes = []
+    if result.lodging_boost_nights:
+        lodging_notes.append(f"숙박 {result.lodging_boost_nights}박 1.5배 적용")
     if result.lodging.note:
-        ws[cells["lodging_note"]] = result.lodging.note
+        lodging_notes.append(result.lodging.note)
+    if lodging_notes:
+        ws[cells["lodging_note"]] = " · ".join(lodging_notes)
 
     _fill_grade_blocks(ws, result)
     _clear_unused_grade_blocks(ws, result)
@@ -270,9 +275,10 @@ def _fill_lodging_check(ws: Worksheet, result: TravelResult) -> None:
         if qty["lodging"] > 0
     ]
     actual_by_grade = lodging_actual_by_grade(list(result.stays), result.lodging.actual_krw)
-    ceiling_by_grade = {
-        item.grade: item.amount_krw for item in result.lodging.slices if item.quantity > 0
-    }
+    ceiling_by_grade: dict[str, int] = {}
+    for item in result.lodging.slices:
+        if item.quantity > 0:
+            ceiling_by_grade[item.grade] = ceiling_by_grade.get(item.grade, 0) + item.amount_krw
     for grade, nights in nights_by_grade:
         ceiling = ceiling_by_grade.get(grade, 0)
         actual = actual_by_grade.get(grade, 0)

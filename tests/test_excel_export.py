@@ -125,6 +125,22 @@ def test_breakfast_writes_meal_note_and_reduced_amount():
     wb.close()
 
 
+def test_lodging_boost_writes_note_and_raised_ceiling():
+    result = calculate_travel(
+        _sample(stays=[StayInput("미국", "샌프란시스코", 4, "가", stay_days=5, lodging_boosted=True)])
+    )
+    wb, _ = _workbook(result)
+    ws = wb[OUTPUT_SHEET_NAME]
+    assert ws["E9"].value == "숙박 4박 1.5배 적용"
+    assert ws["I8"].value == 232
+    assert ws["J8"].value == 4
+    assert ws["K8"].value == 928
+    assert ws["L8"].value == 1_299_200
+    assert ws["H26"].value == 1_299_200
+    assert ws["K26"].value == "미초과"
+    wb.close()
+
+
 def test_rental_days_write_daily_note_and_half_amount():
     result = calculate_travel(
         _sample(stays=[StayInput("미국", "샌프란시스코", 4, "가", stay_days=5, rental_days=2)])

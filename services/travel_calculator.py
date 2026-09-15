@@ -15,6 +15,7 @@ from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from data.travel_rates import (
     DAILY_RENTAL_LABEL,
     GRADES,
+    LODGING_BOOST_LABEL,
     MEAL_BREAKFAST_LABEL,
     PAYMENT_CORPORATE,
     PAYMENT_METHODS,
@@ -23,6 +24,7 @@ from data.travel_rates import (
     ROLES,
     get_daily_rate_usd,
     get_daily_rental_rate_usd,
+    get_lodging_boosted_rate_usd,
     get_lodging_rate_usd,
     get_meal_breakfast_rate_usd,
     get_meal_rate_usd,
@@ -92,6 +94,7 @@ class StayInput:
     rental_days: int = 0
     actual_krw: int = 0
     breakfast_included: bool = False
+    lodging_boosted: bool = False
 
     @property
     def place_label(self) -> str:
@@ -182,6 +185,7 @@ class TravelResult:
     grade_quantities: dict[str, dict[str, int]] = field(default_factory=dict)
     rental_days: int = 0
     breakfast_nights: int = 0
+    lodging_boost_nights: int = 0
 
 
 @dataclass(frozen=True)
@@ -406,6 +410,29 @@ def breakfast_days_for_stay(stay: StayInput) -> int:
     return min(max(stay.nights, 0), days)
 
 
+def lodging_boost_nights_for_stay(stay: StayInput) -> int:
+    """숙박 1.5배를 적용하는 박수."""
+    if not stay.lodging_boosted:
+        return 0
+    return max(stay.nights, 0)
+
+
+def lodging_items_from_stays(stays: list[StayInput], role: str) -> list[tuple[str, int, int, str]]:
+    """숙박 상한 조각. 1.5배 적용 박은 기준액의 3/2."""
+    items: list[tuple[str, int, int, str]] = []
+    for stay in stays:
+        nights = stay.nights
+        if nights <= 0:
+            continue
+        if stay.lodging_boosted:
+            items.append(
+                (stay.grade, get_lodging_boosted_rate_usd(role, stay.grade), nights, LODGING_BOOST_LABEL)
+            )
+        else:
+            items.append((stay.grade, get_lodging_rate_usd(role, stay.grade), nights, ""))
+    return items
+
+
 def meal_items_from_stays(stays: list[StayInput], role: str) -> list[tuple[str, int, int, str]]:
     """식비 조각. 조식 포함 숙박일은 기준액의 1/3을 뺀다."""
     items: list[tuple[str, int, int, str]] = []
@@ -589,12 +616,9 @@ def calculate_travel(inp: TravelInput) -> TravelResult:
 
     meal = _line_from_slices(_slices_by_grade(meal_items_from_stays(stays, inp.role), inp.exchange_rate), inp.meal_payment_method)
     breakfast_nights = sum(breakfast_days_for_stay(stay) for stay in stays)
+    lodging_boost_nights = sum(lodging_boost_nights_for_stay(stay) for stay in stays)
 
-    lodging_items = [
-        (stay.grade, get_lodging_rate_usd(inp.role, stay.grade), stay.nights)
-        for stay in stays
-    ]
-    lodging_slices = _slices_by_grade(lodging_items, inp.exchange_rate)
+    lodging_slices = _slices_by_grade(lodging_items_from_stays(stays, inp.role), inp.exchange_rate)
     ceiling_usd = sum(item.amount_usd for item in lodging_slices)
     ceiling_krw = sum(item.amount_krw for item in lodging_slices)
     if len(lodging_slices) == 1:
@@ -647,5 +671,6 @@ def calculate_travel(inp: TravelInput) -> TravelResult:
         grade_quantities=grade_block_quantities(stays),
         rental_days=rental_days,
         breakfast_nights=breakfast_nights,
+        lodging_boost_nights=lodging_boost_nights,
     )
 

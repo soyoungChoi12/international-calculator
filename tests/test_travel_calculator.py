@@ -117,6 +117,7 @@ def test_spec_example_under_ceiling():
     }
     assert result.stays[0].stay_days == 5
     assert result.breakfast_nights == 0
+    assert result.lodging_boost_nights == 0
 
 
 def test_lodging_over_ceiling_keeps_actual_and_notes_excess():
@@ -334,6 +335,60 @@ def test_breakfast_nights_cannot_exceed_stay_days():
     )
     assert result.breakfast_nights == 4
     assert result.meal.amount_usd == 45 * 4
+
+
+def test_lodging_boost_applies_one_and_half_ceiling():
+    """4박 가 지역 숙박 1.5배면 상한은 155의 1.5배(232)×4박."""
+    result = calculate_travel(
+        _sample(
+            stays=[StayInput("미국", "샌프란시스코", 4, "가", stay_days=5, lodging_boosted=True)],
+        )
+    )
+    assert result.lodging_boost_nights == 4
+    assert result.lodging.rate_usd == 232
+    assert result.lodging.ceiling_usd == 928
+    assert result.lodging.ceiling_krw == 1_299_200
+    assert result.lodging.slices[0].label == "숙박 1.5배"
+    assert result.lodging.payable_krw == 750_000
+    assert result.lodging.exceeded is False
+
+
+def test_lodging_boost_raises_ceiling_so_actual_may_fit():
+    over = calculate_travel(_sample(lodging_actual_krw=1_000_000))
+    assert over.lodging.exceeded is True
+    boosted = calculate_travel(
+        _sample(
+            lodging_actual_krw=1_000_000,
+            stays=[StayInput("미국", "샌프란시스코", 4, "가", stay_days=5, lodging_boosted=True)],
+        )
+    )
+    assert boosted.lodging.ceiling_krw == 1_299_200
+    assert boosted.lodging.exceeded is False
+    assert boosted.lodging.note == ""
+
+
+def test_lodging_boost_only_applies_to_selected_stay():
+    result = calculate_travel(
+        _sample(
+            lodging_nights=3,
+            departure_date=date(2026, 8, 31),
+            return_date=date(2026, 9, 3),
+            lodging_actual_krw=500_000,
+            stays=[
+                StayInput("영국", "런던", 1, "가", stay_days=1, lodging_boosted=True),
+                StayInput("영국", "버밍엄", 2, "나", stay_days=3),
+            ],
+        )
+    )
+    assert result.lodging_boost_nights == 1
+    assert result.lodging.slices[0].rate_usd == 232
+    assert result.lodging.slices[0].quantity == 1
+    assert result.lodging.slices[0].label == "숙박 1.5배"
+    assert result.lodging.slices[1].rate_usd == 123
+    assert result.lodging.slices[1].quantity == 2
+    assert result.lodging.slices[1].label == ""
+    assert result.lodging.ceiling_usd == 232 + 246
+    assert result.lodging.ceiling_krw == 324_800 + 344_400
 
 
 def test_calculate_for_members_uses_each_role():
