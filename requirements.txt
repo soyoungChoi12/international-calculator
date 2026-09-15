@@ -1,3 +1,4 @@
+# Streamlit Cloud rebuild 2026-09-15 lodging-1.5x
 streamlit==1.62.0
 openpyxl==3.1.5
 pypdf==6.16.2

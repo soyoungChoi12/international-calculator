@@ -514,10 +514,16 @@ def _render_stay(
         )
     )
 
-    lodging_boosted = st.checkbox(
-        "숙박비 1.5배",
-        key=f"stay_boost_{stay_id}",
-        help="체크하면 이 출장지의 숙박상한을 기준액의 1.5배로 계상합니다.",
+    lodging_boosted = (
+        st.radio(
+            "숙박상한",
+            options=("기준액", "1.5배"),
+            index=0,
+            horizontal=True,
+            key=f"stay_boost_mode_{stay_id}",
+            help="1.5배를 고르면 이 출장지의 숙박상한을 기준액의 1.5배로 계상합니다.",
+        )
+        == "1.5배"
     )
     actual_label = "숙박비 실비 (원)" if total == 1 else f"숙박비 실비 (원) {index}"
     actual_raw = st.number_input(
