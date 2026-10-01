@@ -101,7 +101,7 @@ def refresh_plan_document(plan: PlanDocument | None) -> PlanDocument | None:
 
 def parse_plan_text(text: str) -> PlanDocument:
     compact = _compact(text)
-    period = _section(compact, ("출장기간 및 장소", "출장기간", "출장 기간"))
+    period = _section(compact, ("출장기간 및 장소", "출장기간", "출장 기간", "출장일정", "출장 일정"))
     traveler_section = _section(compact, ("출장자",))
     purpose = _clean_line(_section(compact, ("출장목적", "목적")))
     event_name = _parse_event_name(compact)
@@ -175,7 +175,7 @@ def _section(text: str, headers: tuple[str, ...]) -> str:
             continue
         rest = text[match.end() :]
         stop = re.search(
-            r"(?:\n|\s{2,})?(?:출장목적|출장지역|출장기간|출장자|출장내용|소요예산|예산과목|"
+            r"(?:\n|\s{2,})?(?:출장목적|출장지역|출장기간|출장일정|출장자|출장내용|소요예산|예산과목|"
             r"방문기관|행사명|프로그램명|지원기업|지원내용|추진일정|목적|개요)\s*[:：❍]?",
             rest,
         )
@@ -213,8 +213,9 @@ def _parse_schedule(text: str) -> tuple[date | None, date | None, int | None]:
             nights = int(paren.group(1))
 
     dotted = re.search(
-        r"(20\d{2}|'\d{2}|\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?"
-        r"\s*[~\-]\s*(?:(20\d{2}|'\d{2}|\d{2})\s*[.\-/년]\s*)?(\d{1,2})\s*[.\-/월]\s*(\d{1,2})",
+        r"(20\d{2}|'\d{2}|\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})"
+        r"(?:\s*일)?(?:\s*\.)?(?:\s*\([^)]{0,8}\))?(?:\s*\.)?\s*[~\-]\s*"
+        r"(?:(20\d{2}|'\d{2}|\d{2})\s*[.\-/년]\s*)?(\d{1,2})\s*[.\-/월]\s*(\d{1,2})",
         text,
     )
     spaced = re.search(
@@ -305,15 +306,31 @@ def _parse_place(text: str) -> tuple[str, str]:
     return country, city
 
 
+def _person_name(raw: str) -> str:
+    """PDF가 '협업팀김기현팀장'처럼 붙으면 이름 앞에 '팀'이 딸려 나온다."""
+    name = (raw or "").strip()
+    if name.startswith("팀") and len(name) >= 3:
+        name = name[1:]
+    return name
+
+
+def _parse_team(text: str) -> str:
+    matches = re.findall(r"[가-힣]{2,20}팀", text)
+    if not matches:
+        return ""
+    team = matches[-1]
+    if "본부" in team:
+        team = team.split("본부", 1)[-1]
+    return team
+
+
 def _parse_travelers(text: str) -> list[PlanTraveler]:
     travelers: list[PlanTraveler] = []
     seen: set[str] = set()
-    team = ""
-    team_match = re.search(r"([가-힣]{2,20}팀|[가-힣]{2,20}본부|[가-힣]{2,20}센터)\s+", text)
-    if team_match:
-        team = team_match.group(1)
-    for name, title in _NAME_TITLE_RE.findall(text):
-        if name.endswith("팀") or name in {"기안", "협조", "전결"}:
+    team = _parse_team(text)
+    for raw_name, title in _NAME_TITLE_RE.findall(text):
+        name = _person_name(raw_name)
+        if not name or name.endswith("팀") or name in {"기안", "협조", "전결"}:
             continue
         if name in seen:
             continue

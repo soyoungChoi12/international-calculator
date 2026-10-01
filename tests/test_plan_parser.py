@@ -39,6 +39,21 @@ MULTI_TRAVELER_PLAN = """
 ㅇ 준비금 : 70,000
 """
 
+AROUNDX_REVIEW_PLAN = """
+2. 출장지역 ◦ 싱가포르 (‘가’ 등급)
+3. 출장일정
+◦ 2026.10.25.(일).~2026.10.30(금), 5박 6일
+10.25.(일) 오후 한국(인천) → 싱가포르(창이) 직항
+4. 방문기관 또는행사명
+◦ 2026 싱가포르 SWITCH
+5. 출장자
+◦ 글로벌본부글로벌전략협업팀김기현팀장 (AroundX 본예산전담)
+◦ 글로벌본부글로벌전략협업팀이한주주임 (AroundX 본예산전담)
+◦ 글로벌본부글로벌전략협업팀이지연사원 (AroundX 본예산전담)
+◦ 글로벌본부글로벌전략협업팀최소영사원 (AroundX 본예산전담)
+◦ 글로벌본부글로벌전략협업팀구가은사원 (AroundX 추경전담)
+"""
+
 
 def test_role_from_title_maps_center_and_head():
     assert role_from_title("센터장") == "센터장"
@@ -80,6 +95,21 @@ def test_multiple_travelers_keep_roles():
     assert plan.preparation_krw == 70_000
 
 
+def test_glued_review_form_strips_team_prefix_and_reads_weekday_dates():
+    plan = parse_plan_text(AROUNDX_REVIEW_PLAN)
+    assert [item.name for item in plan.travelers] == ["김기현", "이한주", "이지연", "최소영", "구가은"]
+    assert [item.title for item in plan.travelers] == ["팀장", "주임", "사원", "사원", "사원"]
+    assert plan.travelers[0].team == "글로벌전략협업팀"
+    assert all(not item.name.startswith("팀") for item in plan.travelers)
+    assert plan.departure == date(2026, 10, 25)
+    assert plan.return_on == date(2026, 10, 30)
+    assert plan.nights == 5
+    assert "5박 6일" in plan.schedule_text
+    assert plan.country == "싱가포르"
+    assert not plan.warnings
+
+
+
 def test_sample_pdf_if_present():
     path = Path(r"c:\Users\ccei\Desktop\참고\해외여비계산기\피드백") / (
         "2026년 AroundX 정글 - 해외GTM 프로그램 참가기업 지원 계획(안) (수정).pdf"
@@ -102,6 +132,22 @@ def test_sample_pdf_if_present():
     assert plan.airfare_note == " (김포 - 간사이공항)"
     assert "AroundX" in "".join(plan.purpose_lines)
     assert any(day == date(2026, 6, 30) for day, _ in plan.itinerary)
+
+
+def test_aroundx_review_pdf_if_present():
+    path = Path(r"c:\Users\ccei\Downloads") / (
+        "1.+공무국외출장+심사신청서(AroundX+5인)_260915+(2).hwp.pdf"
+    )
+    if not path.exists():
+        return
+    plan = parse_plan_pdf(path.read_bytes())
+    assert [item.name for item in plan.travelers] == ["김기현", "이한주", "이지연", "최소영", "구가은"]
+    assert all(not item.name.startswith("팀") for item in plan.travelers)
+    assert plan.departure == date(2026, 10, 25)
+    assert plan.return_on == date(2026, 10, 30)
+    assert plan.nights == 5
+    assert plan.country == "싱가포르"
+    assert not any("출장 일정" in warn for warn in plan.warnings)
 
 
 def test_refresh_plan_document_reparses_stale_object():
