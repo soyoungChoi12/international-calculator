@@ -54,6 +54,16 @@ AROUNDX_REVIEW_PLAN = """
 ◦ 글로벌본부글로벌전략협업팀구가은사원 (AroundX 추경전담)
 """
 
+HUB_ONE_TRAVELER_PLAN = """
+2. 출장지역 ◦ 싱가포르 (‘가’ 등급)
+3. 출장일정
+◦ 2026.10.25.(일).~2026.10.30(금), 5박 6일
+5. 출장자
+◦ 글로벌본부글로벌전략협업팀장민규사원
+ - 현지기관·투자자연계이벤트운영
+6. 소요예산
+"""
+
 
 def test_role_from_title_maps_center_and_head():
     assert role_from_title("센터장") == "센터장"
@@ -110,6 +120,15 @@ def test_glued_review_form_strips_team_prefix_and_reads_weekday_dates():
 
 
 
+def test_glued_hub_form_keeps_jang_surname_as_one_traveler():
+    plan = parse_plan_text(HUB_ONE_TRAVELER_PLAN)
+    assert [(item.name, item.title) for item in plan.travelers] == [("장민규", "사원")]
+    assert plan.travelers[0].team == "글로벌전략협업팀"
+    assert plan.departure == date(2026, 10, 25)
+    assert plan.return_on == date(2026, 10, 30)
+    assert plan.nights == 5
+
+
 def test_sample_pdf_if_present():
     path = Path(r"c:\Users\ccei\Desktop\참고\해외여비계산기\피드백") / (
         "2026년 AroundX 정글 - 해외GTM 프로그램 참가기업 지원 계획(안) (수정).pdf"
@@ -148,6 +167,20 @@ def test_aroundx_review_pdf_if_present():
     assert plan.nights == 5
     assert plan.country == "싱가포르"
     assert not any("출장 일정" in warn for warn in plan.warnings)
+
+
+def test_hub_one_traveler_pdf_if_present():
+    path = Path(r"c:\Users\ccei\Downloads") / (
+        "1.+공무국외출장+심사신청서(글로벌전략허브+1인)_260915.hwp.pdf"
+    )
+    if not path.exists():
+        return
+    plan = parse_plan_pdf(path.read_bytes())
+    assert [(item.name, item.title) for item in plan.travelers] == [("장민규", "사원")]
+    assert plan.travelers[0].team == "글로벌전략협업팀"
+    assert plan.departure == date(2026, 10, 25)
+    assert plan.return_on == date(2026, 10, 30)
+    assert plan.nights == 5
 
 
 def test_refresh_plan_document_reparses_stale_object():

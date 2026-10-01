@@ -306,6 +306,49 @@ def _parse_place(text: str) -> tuple[str, str]:
     return country, city
 
 
+_ORG_TEAM_HINTS = (
+    "본부",
+    "센터",
+    "전략",
+    "협업",
+    "허브",
+    "지원",
+    "기획",
+    "운영",
+    "사업",
+    "국제",
+    "글로벌",
+    "현지",
+    "창경",
+    "경영",
+    "재무",
+    "인사",
+    "총무",
+    "개발",
+    "연구",
+    "홍보",
+    "지역",
+    "혁신",
+    "투자",
+    "성장",
+)
+_SKIP_TRAVELER_NAMES = {
+    "기안",
+    "협조",
+    "전결",
+    "협업",
+    "전략",
+    "글로벌",
+    "본부",
+    "센터",
+    "허브",
+    "지원",
+    "현지",
+    "출장",
+    "전략협업",
+}
+
+
 def _person_name(raw: str) -> str:
     """PDF가 '협업팀김기현팀장'처럼 붙으면 이름 앞에 '팀'이 딸려 나온다."""
     name = (raw or "").strip()
@@ -314,8 +357,25 @@ def _person_name(raw: str) -> str:
     return name
 
 
+def _looks_like_org_team(token: str) -> bool:
+    body = token[:-1] if token.endswith("팀") else token
+    if len(body) >= 5:
+        return True
+    return any(hint in body for hint in _ORG_TEAM_HINTS)
+
+
+def _strip_org_units(text: str) -> str:
+    """'글로벌전략협업팀장민규사원'에서 부서를 떼 장민규 사원만 남긴다."""
+
+    def repl(match: re.Match[str]) -> str:
+        token = match.group(0)
+        return " " if _looks_like_org_team(token) else token
+
+    return re.sub(r"[가-힣]{2,20}?팀", repl, text)
+
+
 def _parse_team(text: str) -> str:
-    matches = re.findall(r"[가-힣]{2,20}팀", text)
+    matches = [token for token in re.findall(r"[가-힣]{2,20}?팀", text) if _looks_like_org_team(token)]
     if not matches:
         return ""
     team = matches[-1]
@@ -328,9 +388,12 @@ def _parse_travelers(text: str) -> list[PlanTraveler]:
     travelers: list[PlanTraveler] = []
     seen: set[str] = set()
     team = _parse_team(text)
-    for raw_name, title in _NAME_TITLE_RE.findall(text):
+    search = _strip_org_units(text)
+    for raw_name, title in _NAME_TITLE_RE.findall(search):
         name = _person_name(raw_name)
-        if not name or name.endswith("팀") or name in {"기안", "협조", "전결"}:
+        if not name or name.endswith("팀") or name in _SKIP_TRAVELER_NAMES:
+            continue
+        if any(hint in name for hint in ("본부", "전략", "협업", "센터", "허브")):
             continue
         if name in seen:
             continue
