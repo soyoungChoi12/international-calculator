@@ -138,7 +138,7 @@ def test_dates_default_to_today():
     today = date.today()
     assert _by_label(at.date_input, "출국일").value == today
     assert _by_label(at.date_input, "귀국일").value == today
-    assert _by_label(at.date_input, "출장신청서 결재일").value == today
+    assert _by_label(at.date_input, "신청일").value == today
 
 
 def test_changing_approval_date_loads_that_days_fx(monkeypatch):
@@ -156,12 +156,12 @@ def test_changing_approval_date_loads_that_days_fx(monkeypatch):
     monkeypatch.setattr(hana_fx, "fetch_usd_cash_buy", fake_fetch)
     at = AppTest.from_file(str(APP_PATH))
     at.run()
-    _by_label(at.date_input, "출장신청서 결재일").set_value(date(2026, 8, 28))
+    _by_label(at.date_input, "신청일").set_value(date(2026, 8, 28))
     at.run()
     assert not at.exception
     assert _by_label(at.number_input, "적용환율 (USD/KRW)").value == 1404.65
     assert any("1,404.65원" in caption.value and "2026-08-28" in caption.value for caption in at.caption)
-    _by_label(at.date_input, "출장신청서 결재일").set_value(date(2026, 9, 1))
+    _by_label(at.date_input, "신청일").set_value(date(2026, 9, 1))
     at.run()
     assert not at.exception
     assert _by_label(at.number_input, "적용환율 (USD/KRW)").value == 1399.57

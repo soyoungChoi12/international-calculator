@@ -94,7 +94,7 @@ BLANK_CELLS = (
 
 FX_SOURCE_TEXT = "하나은행 환율정보"
 FX_SOURCE_URL = "https://biz.kebhana.com/foex/rate/index.do?menuItemId=wcfxd740_101i#//HanaBank"
-FX_GUIDE_TEXT = "※ 기준액을 원화로 환산시 출장신청서 결재일 하나은행 환율정보 미국달러 현찰 살 때를 기준으로 함"
+FX_GUIDE_TEXT = "※ 기준액을 원화로 환산시 신청일 하나은행 환율정보 미국달러 현찰 살 때를 기준으로 함"
 FX_RATE_KIND = "현찰 살 때"
 FX_SOURCE_CAPTION = "하나은행 환율정보(미국달러 현찰 살 때)"
 UNENTERED_PAYMENT_MARK = "-"

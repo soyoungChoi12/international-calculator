@@ -114,7 +114,7 @@ def _apply_cached_fx(approval: date) -> None:
 
 
 def _sync_fx_for_approval(approval: date) -> None:
-    """결재일에 맞는 하나은행 현찰 살 때를 적용환율 칸에 넣는다."""
+    """신청일에 맞는 하나은행 현찰 살 때를 적용환율 칸에 넣는다."""
     approval = _as_date(approval)
     if _fx_is_loaded(approval):
         return
@@ -640,7 +640,7 @@ def main() -> None:
         with date_col3:
             approval = _as_date(
                 st.date_input(
-                    "출장신청서 결재일",
+                    "신청일",
                     value=today,
                     key="approval_date",
                     help="환율 조회 기준일. 날짜를 바꾸면 해당일 하나은행 미국달러 현찰 살 때를 다시 조회합니다.",
@@ -741,7 +741,7 @@ def main() -> None:
             value=None,
             placeholder="0.00",
             key=_fx_input_key(),
-            help="하나은행 환율정보 · 미국달러 현찰 살 때. 결재일을 바꾸면 해당 날짜 고시가 자동으로 들어옵니다.",
+            help="하나은행 환율정보 · 미국달러 현찰 살 때. 신청일을 바꾸면 해당 날짜 고시가 자동으로 들어옵니다.",
         )
         fx_quote = st.session_state.get("fx_quote")
         if fx_quote:

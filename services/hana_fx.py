@@ -243,7 +243,7 @@ def peek_cached_usd_cash_buy(when: date) -> HanaFxQuote | None:
 
 
 def fetch_usd_cash_buy(when: date) -> HanaFxQuote | None:
-    """결재일 기준 하나은행 미국달러 현찰 살 때. 휴일이면 직전 영업일 고시."""
+    """신청일 기준 하나은행 미국달러 현찰 살 때. 휴일이면 직전 영업일 고시."""
     when = _as_date(when)
     cached = _QUOTE_CACHE.get(when.isoformat())
     if cached:
@@ -273,5 +273,5 @@ def quote_caption(quote: HanaFxQuote, requested_on: date) -> str:
         stamp = f"{stamp} · {quote.round_no}회차"
     parts.append(stamp)
     if quote.posted_on != requested_on:
-        parts.append(f"결재일이 비영업일이라 {quote.posted_on.isoformat()} 고시를 사용")
+        parts.append(f"신청일이 비영업일이라 {quote.posted_on.isoformat()} 고시를 사용")
     return " · ".join(parts)
